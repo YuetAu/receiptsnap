@@ -24,7 +24,7 @@ import type { ExtractReceiptDataOutput as AIExtractReceiptDataOutput } from '@/a
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/use-auth'; 
-import { auth } from '@/lib/firebase'; // Direct import of auth for currentUser
+import { auth } from '@/lib/firebase'; 
 
 const itemSchema = z.object({
   id: z.string().optional(),
@@ -133,15 +133,19 @@ export function ExpenseForm() {
       return;
     }
     setIsSaving(true);
+    let idToken: string | null = null; 
     try {
       // Force refresh the token to ensure it's not stale
-      const idToken = await auth.currentUser.getIdToken(true); 
+      idToken = await auth.currentUser.getIdToken(true); 
 
-      if (!idToken) {
-        toast({ title: 'Authentication Error', description: 'Could not retrieve user session. Please try logging in again.', variant: 'destructive' });
+      if (!idToken || typeof idToken !== 'string' || idToken.trim() === '') {
+        console.error("onSubmit: idToken is null, empty, or not a string after getIdToken(true). Token:", idToken);
+        toast({ title: 'Authentication Error', description: 'Could not retrieve valid user session token. Please try logging in again.', variant: 'destructive' });
         setIsSaving(false);
         return;
       }
+      // console.log("onSubmit: Obtained idToken (first 20 chars):", idToken.substring(0, 20));
+
 
       const result = await saveExpense(idToken, data); 
 
@@ -160,10 +164,11 @@ export function ExpenseForm() {
           fileInputRef.current.value = '';
         }
       } else {
+        console.error("onSubmit: saveExpense returned error:", result.error, "Token used (first 20 chars):", idToken ? idToken.substring(0, 20) : "null/empty");
         toast({ title: 'Save Failed', description: result.error, variant: 'destructive' });
       }
     } catch (error: any) {
-      console.error("Error getting ID token or saving expense:", error);
+      console.error("onSubmit: Error during token retrieval or saveExpense call:", error, "Token value if obtained (first 20 chars):", idToken ? idToken.substring(0,20) : "not obtained or null/empty");
       toast({ title: 'Save Failed', description: error.message || "An unexpected error occurred.", variant: 'destructive' });
     } finally {
       setIsSaving(false);
@@ -402,3 +407,5 @@ export function ExpenseForm() {
     </Card>
   );
 }
+
+    

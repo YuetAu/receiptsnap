@@ -59,12 +59,16 @@ export async function saveExpense(idToken: string, data: ExpenseFormData): Promi
   const adminDb = getAdminDb();
 
   if (!adminAuth || !adminDb) {
+    console.error("saveExpense: Firebase Admin SDK not initialized correctly on the server.");
     return { success: false, error: "Firebase Admin SDK not initialized correctly on the server." };
   }
 
-  if (!idToken) {
-    return { success: false, error: "ID token was not provided to the server action." };
+  if (!idToken || typeof idToken !== 'string' || idToken.trim() === '') {
+    console.error("saveExpense: ID token was not provided, not a string, or empty. Token received (type):", typeof idToken, "Token (is falsy):", !idToken);
+    return { success: false, error: "ID token was not provided or was invalid before verification. Please try logging in again." };
   }
+  // console.log("saveExpense: Received idToken (first 20 chars):", idToken.substring(0,20), "Full length:", idToken.length);
+
 
   try {
     // 1. Verify the ID token
@@ -107,8 +111,9 @@ export async function saveExpense(idToken: string, data: ExpenseFormData): Promi
     if (error.code === 'auth/id-token-expired') {
       errorMessage = 'Session expired. Please log in again.';
     } else if (error.code === 'auth/argument-error' || 
-               (error.message && (error.message.includes('VerifyIdTokenRequest') || error.message.toLowerCase().includes('invalid format') || error.message.toLowerCase().includes('invalid token')))) {
-      errorMessage = 'Invalid ID token provided. Please try logging in again.';
+               (error.message && (error.message.toLowerCase().includes('verifyidtokenrequest') || error.message.toLowerCase().includes('invalid format') || error.message.toLowerCase().includes('invalid token')))) {
+      console.error(`saveExpense: verifyIdToken failed with auth/argument-error. This might indicate a malformed token or a mismatch between the Firebase project used by the client (check NEXT_PUBLIC_FIREBASE_PROJECT_ID) and the admin SDK (check project_id in your service account file). Token (first 20 chars): ${idToken ? idToken.substring(0,20) : "N/A"}... Token length: ${idToken ? idToken.length : "N/A"}. Full error:`, error.message);
+      errorMessage = 'Invalid ID token provided. Please try logging in again. (Dev note: Check for client/admin Firebase project ID mismatch or a malformed token.)';
     } else if (error.code === 'permission-denied' || (error.message && error.message.toLowerCase().includes('permission denied'))) {
         errorMessage = 'Firestore permission denied. Check your security rules and Admin SDK setup.';
     } else if (error.message) {
@@ -157,8 +162,9 @@ export async function createCompany(idToken: string, companyName: string): Promi
   if (!adminAuth || !adminDb) {
     return { success: false, error: "Firebase Admin SDK not initialized." };
   }
-  if (!idToken) {
-    return { success: false, error: "Authentication token not provided." };
+  if (!idToken || typeof idToken !== 'string' || idToken.trim() === '') {
+    console.error("createCompany: ID token was not provided, not a string, or empty.");
+    return { success: false, error: "Authentication token not provided or invalid." };
   }
 
   try {
@@ -168,16 +174,18 @@ export async function createCompany(idToken: string, companyName: string): Promi
     const companyData: Omit<Company, 'id'> = {
       name: companyName,
       ownerId: uid,
-      members: [uid], // Owner is initially the only member
+      members: [uid], 
       createdAt: serverTimestamp() as Timestamp,
     };
 
     const companyRef = await adminDb.collection('companies').add(companyData);
     
-    // Update user document with companyId (optional, but good for quick lookups)
-    await adminDb.collection('users').doc(uid).update({ companyId: companyRef.id });
+    // Also update the user document with the companyId
+    // This assumes you have a 'users' collection where user profiles are stored.
+    // If not, you might need to create/update it here or manage company association differently.
+    await adminDb.collection('users').doc(uid).set({ companyId: companyRef.id }, { merge: true });
     
-    revalidatePath('/companies'); // Or a relevant path
+    revalidatePath('/companies'); 
     return { success: true, companyId: companyRef.id };
   } catch (error: any) {
     console.error("Error creating company:", error);
@@ -185,7 +193,8 @@ export async function createCompany(idToken: string, companyName: string): Promi
      if (error.code === 'auth/id-token-expired') {
       errorMessage = 'Session expired. Please log in again.';
     } else if (error.code === 'auth/argument-error') {
-      errorMessage = 'Invalid ID token provided.';
+       console.error(`createCompany: verifyIdToken failed. Check for client/admin project ID mismatch. Token (first 20): ${idToken ? idToken.substring(0,20) : "N/A"}`);
+      errorMessage = 'Invalid ID token provided for company creation.';
     } else if (error.message) {
       errorMessage = error.message;
     }
@@ -201,15 +210,15 @@ export async function sendInvitation(idToken: string, companyId: string, invitee
   if (!adminAuth || !adminDb) {
     return { success: false, error: "Firebase Admin SDK not initialized." };
   }
-   if (!idToken) {
-    return { success: false, error: "Authentication token not provided." };
+   if (!idToken || typeof idToken !== 'string' || idToken.trim() === '') {
+    console.error("sendInvitation: ID token was not provided, not a string, or empty.");
+    return { success: false, error: "Authentication token not provided or invalid." };
   }
 
   try {
     const decodedToken = await adminAuth.verifyIdToken(idToken);
     const inviterUid = decodedToken.uid;
 
-    // Check if inviter is part of the company (optional, based on rules)
     const companyDoc = await adminDb.collection('companies').doc(companyId).get();
     if (!companyDoc.exists) {
       return { success: false, error: "Company not found." };
@@ -219,7 +228,7 @@ export async function sendInvitation(idToken: string, companyId: string, invitee
         return { success: false, error: "You are not authorized to invite users to this company." };
     }
 
-    // Check if user already exists or is already a member
+    // Check if the invitee is already a member
     const inviteeUserRecord = await adminAuth.getUserByEmail(inviteeEmail).catch(() => null);
     if (inviteeUserRecord && companyData.members.includes(inviteeUserRecord.uid)) {
         return { success: false, error: "User is already a member of this company."};
@@ -236,12 +245,10 @@ export async function sendInvitation(idToken: string, companyId: string, invitee
 
     const invitationRef = await adminDb.collection('invitations').add(invitationData);
     
-    // Here you would typically send an email to inviteeEmail with a link
-    // For this example, we'll just log it.
+    // Optionally, send an email notification here (requires an email service)
     console.log(`Invitation sent to ${inviteeEmail} for company ${companyData.name}. Invitation ID: ${invitationRef.id}`);
-    // TODO: Implement email sending logic (e.g., using Firebase Extensions or a third-party service)
 
-    revalidatePath(`/companies/${companyId}/invitations`); // Or a relevant path
+    revalidatePath(`/companies/${companyId}/invitations`); // If you have such a page
     return { success: true, invitationId: invitationRef.id };
 
   } catch (error: any) {
@@ -250,13 +257,22 @@ export async function sendInvitation(idToken: string, companyId: string, invitee
     if (error.code === 'auth/id-token-expired') {
       errorMessage = 'Session expired. Please log in again.';
     } else if (error.code === 'auth/argument-error') {
-      errorMessage = 'Invalid ID token provided.';
+      console.error(`sendInvitation: verifyIdToken failed. Check for client/admin project ID mismatch. Token (first 20): ${idToken ? idToken.substring(0,20) : "N/A"}`);
+      errorMessage = 'Invalid ID token provided for sending invitation.';
     } else if (error.code === 'auth/user-not-found' && error.message.includes(inviteeEmail)) {
-      // This might be okay if you allow inviting non-existing users who will sign up
-      // For now, let's allow it and the invitation will wait for them to register.
+      // This is fine, means we are inviting a new user to the platform
+      // Proceed to create the invitation. The error will be caught if user creation (by invitee) fails.
+      // The current structure correctly creates the invitation even if user doesn't exist, which is intended.
     } else if (error.message) {
       errorMessage = error.message;
     }
+    // If it's an 'auth/user-not-found' but not related to inviteeEmail or other specific cases,
+    // it might be an issue with the inviter's token or Admin SDK setup.
+    // The generic error message will cover this.
+
+    // Re-check if invitationData was defined before returning it, to avoid potential error
+    // This catch block will only be executed if an error occurred before `invitationRef` was created.
+    // So no need to return invitationRef.id here.
     return { success: false, error: errorMessage };
   }
 }
@@ -268,8 +284,9 @@ export async function acceptInvitation(idToken: string, invitationId: string): P
   if (!adminAuth || !adminDb) {
     return { success: false, error: "Firebase Admin SDK not initialized." };
   }
-  if (!idToken) {
-    return { success: false, error: "Authentication token not provided." };
+  if (!idToken || typeof idToken !== 'string' || idToken.trim() === '') {
+    console.error("acceptInvitation: ID token was not provided, not a string, or empty.");
+    return { success: false, error: "Authentication token not provided or invalid." };
   }
   
   try {
@@ -295,22 +312,24 @@ export async function acceptInvitation(idToken: string, invitationId: string): P
 
     const companyRef = adminDb.collection('companies').doc(invitationData.companyId);
     
-    // Transaction to update company members and invitation status
     await adminDb.runTransaction(async (transaction) => {
       const companyDoc = await transaction.get(companyRef);
       if (!companyDoc.exists) {
         throw new Error("Company associated with this invitation no longer exists.");
       }
       const companyData = companyDoc.data() as Company;
+      
+      // Add user to company members
       const updatedMembers = Array.from(new Set([...companyData.members, acceptingUserId]));
       
       transaction.update(companyRef, { members: updatedMembers });
       transaction.update(invitationRef, { status: 'accepted', acceptedBy: acceptingUserId, acceptedAt: serverTimestamp() });
-      // Also update user's companyId
-      transaction.update(adminDb.collection('users').doc(acceptingUserId), { companyId: invitationData.companyId });
+      
+      // Update user's profile with companyId
+      transaction.set(adminDb.collection('users').doc(acceptingUserId), { companyId: invitationData.companyId }, { merge: true });
     });
     
-    revalidatePath('/companies'); // Or relevant paths
+    revalidatePath('/companies'); 
     revalidatePath(`/companies/${invitationData.companyId}`);
     return { success: true };
 
@@ -320,7 +339,8 @@ export async function acceptInvitation(idToken: string, invitationId: string): P
      if (error.code === 'auth/id-token-expired') {
       errorMessage = 'Session expired. Please log in again.';
     } else if (error.code === 'auth/argument-error') {
-      errorMessage = 'Invalid ID token provided.';
+      console.error(`acceptInvitation: verifyIdToken failed. Check for client/admin project ID mismatch. Token (first 20): ${idToken ? idToken.substring(0,20) : "N/A"}`);
+      errorMessage = 'Invalid ID token provided for accepting invitation.';
     } else if (error.message) {
       errorMessage = error.message;
     }
@@ -332,14 +352,17 @@ export async function getCompaniesForUser(userId: string): Promise<Company[]> {
     if (!userId) return [];
     try {
         const companiesCol = collection(db, 'companies');
-        // Query for companies where the user is a member OR the owner
-        // Firestore does not support OR queries on different fields directly in this way.
-        // A common workaround is to query for one condition and filter client-side, or duplicate data.
-        // For simplicity here, we'll fetch companies where user is in 'members' array.
-        // A more robust solution might involve a 'userCompanies' subcollection or denormalization.
-        const q = query(companiesCol, where('members', 'array-contains', userId));
-        const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Company));
+        // Query where the userId is in the 'members' array or is the 'ownerId'
+        const qOwner = query(companiesCol, where('ownerId', '==', userId));
+        const qMember = query(companiesCol, where('members', 'array-contains', userId));
+        
+        const [ownerSnapshot, memberSnapshot] = await Promise.all([getDocs(qOwner), getDocs(qMember)]);
+        
+        const companiesMap = new Map<string, Company>();
+        ownerSnapshot.docs.forEach(doc => companiesMap.set(doc.id, { id: doc.id, ...doc.data() } as Company));
+        memberSnapshot.docs.forEach(doc => companiesMap.set(doc.id, { id: doc.id, ...doc.data() } as Company));
+        
+        return Array.from(companiesMap.values());
     } catch (error) {
         console.error("Error fetching companies:", error);
         return [];
