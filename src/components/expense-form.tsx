@@ -1,4 +1,3 @@
-
 // src/components/expense-form.tsx
 'use client';
 
@@ -24,7 +23,7 @@ import { UploadCloud, PlusCircle, XCircle, Loader2, CalendarIcon } from 'lucide-
 import type { ExtractReceiptDataOutput as AIExtractReceiptDataOutput } from '@/ai/flows/extract-receipt-data';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { useAuth } from '@/hooks/use-auth'; // Import useAuth
+import { useAuth } from '@/hooks/use-auth'; 
 
 const itemSchema = z.object({
   id: z.string().optional(),
@@ -54,7 +53,7 @@ export function ExpenseForm() {
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { user } = useAuth(); // Get authenticated user
+  const { user } = useAuth(); 
 
   const form = useForm<ExpenseFormData>({
     resolver: zodResolver(expenseFormSchema),
@@ -128,35 +127,48 @@ export function ExpenseForm() {
   };
 
   const onSubmit = async (data: ExpenseFormData) => {
-    if (!user) {
+    if (!user || !auth.currentUser) { // auth is from firebase client sdk
       toast({ title: 'Not Authenticated', description: 'Please log in to save expenses.', variant: 'destructive' });
       return;
     }
-    toast({title: 'Saving...', description: 'You are '+user.uid})
     setIsSaving(true);
-    const result = await saveExpense(user.uid, data); // Pass user.uid
-    setIsSaving(false);
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      const result = await saveExpense(idToken, data); 
 
-    if (result.success) {
-      toast({ title: 'Expense Saved', description: 'Your expense has been successfully saved.' });
-      form.reset({
-        company: '',
-        items: [{ name: '', quantity: 1, netPrice: 0 }],
-        category: 'other',
-        expenseDate: new Date(),
-        paymentMethod: 'card',
-      });
-      setImageFile(null);
-      setImagePreviewUrl(null);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+      if (result.success) {
+        toast({ title: 'Expense Saved', description: `Your expense (ID: ${result.docId}) has been successfully saved.` });
+        form.reset({
+          company: '',
+          items: [{ name: '', quantity: 1, netPrice: 0 }],
+          category: 'other',
+          expenseDate: new Date(),
+          paymentMethod: 'card',
+        });
+        setImageFile(null);
+        setImagePreviewUrl(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+      } else {
+        toast({ title: 'Save Failed', description: result.error, variant: 'destructive' });
       }
-    } else {
-      toast({ title: 'Save Failed', description: result.error, variant: 'destructive' });
+    } catch (error: any) {
+      console.error("Error getting ID token or saving expense:", error);
+      toast({ title: 'Save Failed', description: error.message || "An unexpected error occurred.", variant: 'destructive' });
+    } finally {
+      setIsSaving(false);
     }
   };
   
+  // Need to import auth from firebase client for getIdToken
+  let auth: any; // placeholder for firebase auth instance
   useEffect(() => {
+    // Dynamically import firebase auth to avoid SSR issues if not already handled
+    import('@/lib/firebase').then(firebaseModule => {
+      auth = firebaseModule.auth;
+    });
+
     return () => {
       if (imagePreviewUrl && imagePreviewUrl.startsWith('blob:')) {
         URL.revokeObjectURL(imagePreviewUrl);

@@ -9,6 +9,7 @@ This is a Next.js application that allows users to track expenses by manually en
 - Node.js (v18 or later recommended)
 - npm or yarn
 - A Firebase project
+- A Google Cloud project (can be the same as your Firebase project)
 
 ### Setup Instructions
 
@@ -25,7 +26,7 @@ This is a Next.js application that allows users to track expenses by manually en
     yarn install
     ```
 
-3.  **Set up Firebase:**
+3.  **Set up Firebase (Client-Side):**
     *   Go to the [Firebase Console](https://console.firebase.google.com/) and create a new project (or use an existing one).
     *   In your Firebase project, go to **Project settings** (the gear icon).
     *   Under the "General" tab, find your project's SDK setup snippet. You'll need the configuration values (apiKey, authDomain, projectId, etc.).
@@ -48,9 +49,10 @@ This is a Next.js application that allows users to track expenses by manually en
                   allow read, write: if request.auth != null && request.auth.uid == userId;
                 }
                 match /expenses/{expenseId} {
-                  allow read: if request.auth != null && request.auth.uid == resource.data.userId;
-                  allow create: if request.auth != null && request.auth.uid == request.resource.data.userId;
-                  allow update, delete: if request.auth != null && request.auth.uid == resource.data.userId;
+                  // Allow create if the request is authenticated AND the userId in the new document matches the authenticated user's UID
+                  allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+                  // Allow read, update, delete if the user is the owner
+                  allow read, update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
                 }
                 match /companies/{companyId} {
                   allow read: if request.auth != null; // Or more specific rules
@@ -64,10 +66,10 @@ This is a Next.js application that allows users to track expenses by manually en
             ```
             For production, you'll want to define more granular security rules.
 
-4.  **Configure Environment Variables:**
+4.  **Configure Environment Variables (Client & Server):**
     *   Create a new file named `.env.local` in the root of your project.
     *   Copy the contents of the `.env` file (which serves as a template) into `.env.local`.
-    *   Fill in the Firebase configuration values you obtained in the previous step:
+    *   **Client-Side Firebase Config:** Fill in the Firebase configuration values you obtained in the previous step:
         ```env
         NEXT_PUBLIC_FIREBASE_API_KEY="YOUR_API_KEY"
         NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="YOUR_AUTH_DOMAIN"
@@ -76,19 +78,46 @@ This is a Next.js application that allows users to track expenses by manually en
         NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID="YOUR_MESSAGING_SENDER_ID"
         NEXT_PUBLIC_FIREBASE_APP_ID="YOUR_APP_ID"
         ```
-    *   **Important:** `NEXT_PUBLIC_` prefix is necessary for these variables to be exposed to the client-side by Next.js.
-    *   **Troubleshooting `auth/invalid-api-key`**: If you see this error, double-check that `NEXT_PUBLIC_FIREBASE_API_KEY` in your `.env.local` file is correct and that you have restarted your Next.js development server (`npm run dev`) after creating or modifying the `.env.local` file. Environment variables are loaded at build time.
+        *   **Important:** `NEXT_PUBLIC_` prefix is necessary for these variables to be exposed to the client-side by Next.js.
+        *   **Troubleshooting `auth/invalid-api-key`**: If you see this error, double-check that `NEXT_PUBLIC_FIREBASE_API_KEY` in your `.env.local` file is correct and that you have restarted your Next.js development server (`npm run dev`) after creating or modifying the `.env.local` file. Environment variables are loaded at build time.
 
-5.  **Set up Genkit (for AI features):**
-    *   This project uses Google's Gemini model via Genkit. You'll need a Google Cloud project with the AI Platform API enabled and appropriate credentials.
-    *   Follow the Genkit documentation for setting up Google AI: [Genkit Google AI Plugin](https://firebase.google.com/docs/genkit/plugins#google-ai)
-    *   Ensure your `GOOGLE_API_KEY` or Application Default Credentials are set up in your environment where you run the Genkit development server. This might involve setting an environment variable or using `gcloud auth application-default login`.
-      ```bash
-      # Example for GOOGLE_API_KEY, if you are using API Key authentication for Gemini
-      # Add this to your .env.local or set it in your shell environment
-      # GOOGLE_API_KEY="YOUR_GEMINI_API_KEY"
-      ```
-      *Note: The application uses `googleai/gemini-2.0-flash` by default, which is configured in `src/ai/genkit.ts`.*
+5.  **Set up Firebase Admin SDK (Server-Side):**
+    *   The application uses the Firebase Admin SDK for server-side actions like securely writing to Firestore on behalf of an authenticated user.
+    *   You need a service account JSON file:
+        1.  Go to your Firebase project settings -> Service accounts tab.
+        2.  Click "Generate new private key" and download the JSON file.
+        3.  **Important:** Do NOT commit this `*.json` file to your Git repository. Add it to your `.gitignore` file.
+        4.  Store this file securely in your project directory (e.g., in the root or a dedicated config folder that's gitignored).
+        5.  In your `.env.local` file, set the `GOOGLE_APPLICATION_CREDENTIALS` environment variable to the path of this service account file.
+            ```env
+            # .env.local
+            # ... other variables
+            GOOGLE_APPLICATION_CREDENTIALS="./path/to/your-service-account-file.json"
+            ```
+            *Replace `./path/to/your-service-account-file.json` with the actual path to your downloaded file.*
+            *The Firebase Admin SDK will automatically use this environment variable to initialize.*
+
+6.  **Set up Genkit (for AI features):**
+    *   This project uses Google's Gemini model via Genkit for AI-powered receipt data extraction.
+    *   You'll need a Google Cloud project (this can be the same project as your Firebase project) with the "Vertex AI API" or "AI Platform API" enabled.
+    *   Set up authentication for Genkit:
+        *   **Using an API Key (Simpler for development):**
+            1.  In the Google Cloud Console, go to "APIs & Services" -> "Credentials".
+            2.  Click "Create credentials" -> "API key".
+            3.  Copy the API key.
+            4.  **Restrict the API key** to only be usable with the "Vertex AI API" (or the specific Gemini API if available for restriction) for security.
+            5.  In your `.env.local` file, add:
+                ```env
+                # .env.local
+                # ... other variables
+                GOOGLE_API_KEY="YOUR_GEMINI_API_KEY"
+                ```
+        *   **Using Application Default Credentials (ADC) (More secure, recommended for production):**
+            1.  Install the Google Cloud CLI (`gcloud`).
+            2.  Run `gcloud auth application-default login`. This will open a browser window to authenticate.
+            3.  Genkit will automatically pick up these credentials if `GOOGLE_API_KEY` is not set.
+    *   Ensure your `GOOGLE_API_KEY` or ADC are set up in your environment where you run the Genkit development server and your Next.js application (as Genkit flows can be called from server components/actions).
+    *   *Note: The application uses `googleai/gemini-2.0-flash` by default, which is configured in `src/ai/genkit.ts`.*
 
 ### Running the Development Servers
 
@@ -127,6 +156,7 @@ npm run start
 yarn build
 yarn start
 ```
+Ensure all necessary environment variables (including `GOOGLE_APPLICATION_CREDENTIALS` and `GOOGLE_API_KEY` if used) are set in your production environment.
 
 ## Features
 
@@ -134,6 +164,7 @@ yarn start
 - Expense tracking (manual entry and receipt scanning)
 - AI-powered data extraction from receipts (Company, Items, Category, Date, Payment Method)
 - Expense history view
+- Secure server-side expense saving using Firebase Admin SDK
 - Company creation and user invitation system (basic implementation)
 
 ## Project Structure
@@ -148,7 +179,7 @@ yarn start
     -   `src/ai/flows/`: Genkit flow definitions.
 -   `src/contexts/`: React context providers (e.g., AuthContext).
 -   `src/hooks/`: Custom React hooks.
--   `src/lib/`: Utility functions and library configurations (e.g., Firebase setup).
+-   `src/lib/`: Utility functions and library configurations (e.g., Firebase client setup `firebase.ts`, Firebase admin setup `firebaseAdmin.ts`).
 -   `src/types/`: TypeScript type definitions.
 -   `public/`: Static assets.
 
@@ -160,18 +191,19 @@ yarn start
 - Tailwind CSS
 - ShadCN UI
 - Firebase (Authentication, Firestore)
+- Firebase Admin SDK (for secure server-side operations)
 - Genkit (with Google AI - Gemini)
 - Zod (for schema validation)
 - React Hook Form
 
 ## Further Development & TODOs
 
--   Enhance security rules for Firestore.
--   Implement more robust error handling and user feedback.
--   Add image upload to Firebase Storage for receipts.
+-   Enhance security rules for Firestore (review periodically).
+-   Implement more robust error handling and user feedback across the app.
+-   Add image upload to Firebase Storage for receipts, linking them to expenses.
 -   Develop more comprehensive company management features (roles, permissions).
--   Add expense editing and deletion.
+-   Add expense editing and deletion capabilities.
 -   Implement data visualization/dashboard for expenses.
 -   Write unit and integration tests.
--   Improve accessibility.
+-   Improve accessibility (ARIA attributes, keyboard navigation).
 ```

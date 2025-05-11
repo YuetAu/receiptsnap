@@ -1,11 +1,12 @@
 // src/actions/expense-actions.ts
 'use server';
 
-import { db } from '@/lib/firebase';
+import { getAdminDb, getAdminAuth } from '@/lib/firebaseAdmin';
+import { db } from '@/lib/firebase'; // Keep for client-side queries if needed, e.g. getExpenses
 import type { Expense, ExpenseFormData, ExpenseItem, ExpenseCategory, PaymentMethod } from '@/types/expense';
 import { extractReceiptData, type ExtractReceiptDataInput } from '@/ai/flows/extract-receipt-data';
 import type { ExtractReceiptDataOutput as AIExtractReceiptDataOutput } from '@/ai/flows/extract-receipt-data';
-import { addDoc, collection, getDocs, query, orderBy, Timestamp, serverTimestamp, where } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, Timestamp, serverTimestamp, where, addDoc as clientAddDoc } from 'firebase/firestore'; // renamed addDoc to clientAddDoc
 import { revalidatePath } from 'next/cache';
 import { expenseCategories, paymentMethods } from '@/types/expense';
 
@@ -51,62 +52,74 @@ export async function processReceiptImage(photoDataUri: string): Promise<AIExtra
   }
 }
 
-export async function saveExpense(userId: string, data: ExpenseFormData): Promise<{ success: boolean; error?: string }> {
-  if (!userId) {
-    return { success: false, error: "User not authenticated." };
+export async function saveExpense(idToken: string, data: ExpenseFormData): Promise<{ success: boolean; error?: string; docId?: string }> {
+  const adminAuth = getAdminAuth();
+  const adminDb = getAdminDb();
+
+  if (!adminAuth || !adminDb) {
+    return { success: false, error: "Firebase Admin SDK not initialized correctly on the server." };
   }
+
   try {
+    // 1. Verify the ID token
+    const decodedToken = await adminAuth.verifyIdToken(idToken);
+    const uid = decodedToken.uid;
+
+    // 2. Prepare data with verified userId
     const items: ExpenseItem[] = data.items.map(item => {
-      const quantity = Number(item.quantity) || 1; // Default to 1 if quantity is not a valid number or 0
-      const netPrice = Number(item.netPrice) || 0; // Default to 0 if netPrice is not a valid number
+      const quantity = Number(item.quantity) || 1;
+      const netPrice = Number(item.netPrice) || 0;
       return {
         name: item.name,
-        quantity: quantity <= 0 ? 1 : quantity, // Ensure quantity is at least 1
+        quantity: quantity <= 0 ? 1 : quantity,
         netPrice,
       };
     });
 
     const totalAmount = items.reduce((sum, item) => sum + item.netPrice, 0);
     
-    const expenseData: Omit<Expense, 'id' | 'createdAt'> & { createdAt: Timestamp, expenseDate: Timestamp } = {
-      userId, 
+    const expenseData = {
+      userId: uid, // Associate the expense with the authenticated user
       company: data.company,
       items,
       category: data.category,
       totalAmount,
-      expenseDate: Timestamp.fromDate(new Date(data.expenseDate)),
+      expenseDate: Timestamp.fromDate(new Date(data.expenseDate)), // Firestore Timestamp for server
       paymentMethod: data.paymentMethod,
-      createdAt: serverTimestamp() as Timestamp,
+      createdAt: serverTimestamp(), // Firestore server timestamp
     };
 
-    await addDoc(collection(db, 'expenses'), expenseData);
+    // 3. Add the document to Firestore using the admin SDK
+    const docRef = await adminDb.collection('expenses').add(expenseData);
+    
     revalidatePath('/'); 
-    return { success: true };
-  } catch (error) {
-    console.error("Error saving expense to Firestore:", error); // More detailed server log
+    return { success: true, docId: docRef.id };
 
+  } catch (error: any) {
+    console.error("Error in server action (saveExpense):", error);
     let errorMessage = "Failed to save expense. Please try again.";
-    // Check if it's a FirebaseError-like object by looking for 'code' and 'message'
-    if (error instanceof Error) {
-        const firebaseError = error as any; // Cast to any to check for Firebase specific properties
-        if (firebaseError.code) {
-            errorMessage = `Failed to save expense: ${firebaseError.message} (Code: ${firebaseError.code})`;
-        } else {
-            errorMessage = `Failed to save expense: ${firebaseError.message}`;
-        }
+    if (error.code === 'auth/id-token-expired') {
+      errorMessage = 'Session expired. Please log in again.';
+    } else if (error.code === 'auth/argument-error') {
+      errorMessage = 'Invalid ID token provided.';
+    } else if (error.code === 'permission-denied' && error.message.includes('firestore')) {
+        errorMessage = 'Firestore permission denied. Check your security rules and Admin SDK setup.';
+    } else if (error.message) {
+      errorMessage = error.message;
     }
     
     return { success: false, error: errorMessage };
   }
 }
 
+// getExpenses can remain using client-side SDK as it's for fetching data for the current user
 export async function getExpenses(userId: string): Promise<Expense[]> {
   if (!userId) {
     console.warn("getExpenses called without userId.");
     return [];
   }
   try {
-    const expensesCol = collection(db, 'expenses');
+    const expensesCol = collection(db, 'expenses'); // client-side db
     const q = query(
         expensesCol, 
         where('userId', '==', userId), 
@@ -119,8 +132,8 @@ export async function getExpenses(userId: string): Promise<Expense[]> {
       return { 
         id: doc.id,
         ...data,
-        expenseDate: (data.expenseDate as Timestamp).toDate(),
-        createdAt: (data.createdAt as Timestamp).toDate(),
+        expenseDate: (data.expenseDate as Timestamp).toDate(), // Convert Firestore Timestamp to JS Date
+        createdAt: (data.createdAt as Timestamp).toDate(),   // Convert Firestore Timestamp to JS Date
       } as unknown as Expense; 
     });
   } catch (error) {
