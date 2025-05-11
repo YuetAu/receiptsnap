@@ -19,11 +19,10 @@ import { useToast } from '@/hooks/use-toast';
 import { processReceiptImage, saveExpense } from '@/actions/expense-actions';
 import type { ExpenseFormData, ExpenseCategory, PaymentMethod, ExpenseItem } from '@/types/expense';
 import { expenseCategories, paymentMethods } from '@/types/expense';
-import { UploadCloud, PlusCircle, XCircle, Loader2, CalendarIcon, Info } from 'lucide-react';
+import { UploadCloud, PlusCircle, XCircle, Loader2, CalendarIcon } from 'lucide-react';
 import type { ExtractReceiptDataOutput as AIExtractReceiptDataOutput } from '@/ai/flows/extract-receipt-data';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 const itemSchema = z.object({
   id: z.string().optional(),
@@ -32,13 +31,9 @@ const itemSchema = z.object({
     (val) => (typeof val === 'string' ? parseFloat(val) : val),
     z.number().min(0.01, 'Quantity must be positive')
   ),
-  unitPrice: z.preprocess(
+  netPrice: z.preprocess(
     (val) => (typeof val === 'string' ? parseFloat(val) : val),
-    z.number().min(0, 'Unit price must be non-negative')
-  ),
-  discount: z.preprocess(
-    (val) => (val === '' || val === null || val === undefined ? 0 : (typeof val === 'string' ? parseFloat(val) : val)),
-    z.number().min(0, 'Discount must be non-negative').optional().default(0)
+    z.number().min(0, 'Net price must be non-negative')
   ),
 });
 
@@ -62,7 +57,7 @@ export function ExpenseForm() {
     resolver: zodResolver(expenseFormSchema),
     defaultValues: {
       company: '',
-      items: [{ name: '', quantity: 1, unitPrice: 0, discount: 0 }],
+      items: [{ name: '', quantity: 1, netPrice: 0 }],
       category: 'other',
       expenseDate: new Date(),
       paymentMethod: 'card',
@@ -75,16 +70,9 @@ export function ExpenseForm() {
   });
 
   const watchedItems = form.watch('items');
-
-  const calculateNetPrice = (item: { quantity: number | string; unitPrice: number | string; discount: number | string; }) => {
-    const quantity = Number(item.quantity) || 0;
-    const unitPrice = Number(item.unitPrice) || 0;
-    const discount = Number(item.discount) || 0;
-    return (quantity * unitPrice) - discount;
-  };
   
   const calculateTotalExpense = () => {
-    return watchedItems.reduce((total, item) => total + calculateNetPrice(item), 0);
+    return watchedItems.reduce((total, item) => total + (Number(item.netPrice) || 0), 0);
   };
 
 
@@ -97,7 +85,6 @@ export function ExpenseForm() {
         setImagePreviewUrl(reader.result as string);
       };
       reader.readAsDataURL(file);
-      // Do not reset form here, allow user to initiate extraction
     }
   };
 
@@ -111,28 +98,27 @@ export function ExpenseForm() {
     const reader = new FileReader();
     reader.onloadend = async () => {
       const dataUri = reader.result as string;
-      const result = await processReceiptImage(dataUri);
+      // Type assertion for AI result items to match ExpenseItem (which now only has name, quantity, netPrice)
+      const result = await processReceiptImage(dataUri) as (AIExtractReceiptDataOutput & { items: Array<{name: string, quantity: number, netPrice: number}> }) | { error: string};
       setIsExtracting(false);
 
       if ('error' in result) {
         toast({ title: 'Extraction Failed', description: result.error, variant: 'destructive' });
       } else {
-        const aiResult = result as AIExtractReceiptDataOutput & { items: ExpenseItem[] }; // Type assertion
         toast({ title: 'Extraction Successful', description: 'Data extracted from receipt.' });
         
         form.reset({
-          company: aiResult.company,
-          items: aiResult.items.length > 0 
-            ? aiResult.items.map(item => ({ 
+          company: result.company,
+          items: result.items.length > 0 
+            ? result.items.map(item => ({ 
                 name: item.name, 
                 quantity: item.quantity, 
-                unitPrice: item.unitPrice,
-                discount: item.discount,
+                netPrice: item.netPrice,
               })) 
-            : [{ name: '', quantity: 1, unitPrice: 0, discount: 0 }],
-          category: aiResult.category as ExpenseCategory,
-          expenseDate: aiResult.expenseDate ? new Date(aiResult.expenseDate) : new Date(),
-          paymentMethod: aiResult.paymentMethod as PaymentMethod,
+            : [{ name: '', quantity: 1, netPrice: 0 }],
+          category: result.category as ExpenseCategory,
+          expenseDate: result.expenseDate ? new Date(result.expenseDate) : new Date(),
+          paymentMethod: result.paymentMethod as PaymentMethod,
         });
       }
     };
@@ -148,7 +134,7 @@ export function ExpenseForm() {
       toast({ title: 'Expense Saved', description: 'Your expense has been successfully saved.' });
       form.reset({
         company: '',
-        items: [{ name: '', quantity: 1, unitPrice: 0, discount: 0 }],
+        items: [{ name: '', quantity: 1, netPrice: 0 }],
         category: 'other',
         expenseDate: new Date(),
         paymentMethod: 'card',
@@ -156,7 +142,7 @@ export function ExpenseForm() {
       setImageFile(null);
       setImagePreviewUrl(null);
       if (fileInputRef.current) {
-        fileInputRef.current.value = ''; // Clear the file input
+        fileInputRef.current.value = '';
       }
     } else {
       toast({ title: 'Save Failed', description: result.error, variant: 'destructive' });
@@ -271,12 +257,12 @@ export function ExpenseForm() {
               <div className="space-y-3">
                 {fields.map((item, index) => (
                   <div key={item.id} className="p-3 border rounded-md bg-secondary/20 space-y-2 relative">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-3 gap-y-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <FormField
                         control={form.control}
                         name={`items.${index}.name`}
                         render={({ field }) => (
-                          <FormItem className="sm:col-span-2 md:col-span-1">
+                          <FormItem>
                             <FormLabel className="text-xs">Name</FormLabel>
                             <FormControl>
                               <Input placeholder="Item name" {...field} className="text-sm"/>
@@ -292,7 +278,7 @@ export function ExpenseForm() {
                           <FormItem>
                             <FormLabel className="text-xs">Quantity</FormLabel>
                             <FormControl>
-                              <Input type="number" step="any" placeholder="Qty" {...field} className="text-sm" onChange={e => field.onChange(parseFloat(e.target.value) || '')} />
+                              <Input type="number" step="any" placeholder="Qty" {...field} className="text-sm" onChange={e => field.onChange(e.target.value === '' ? '' : parseFloat(e.target.value))} />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -300,38 +286,17 @@ export function ExpenseForm() {
                       />
                       <FormField
                         control={form.control}
-                        name={`items.${index}.unitPrice`}
+                        name={`items.${index}.netPrice`}
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel className="text-xs">Unit Price</FormLabel>
+                            <FormLabel className="text-xs">Net Price</FormLabel>
                             <FormControl>
-                              <Input type="number" step="0.01" placeholder="Unit Price" {...field} className="text-sm" onChange={e => field.onChange(parseFloat(e.target.value) || '')} />
+                              <Input type="number" step="0.01" placeholder="Net Price" {...field} className="text-sm" onChange={e => field.onChange(e.target.value === '' ? '' : parseFloat(e.target.value))} />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
                         )}
                       />
-                      <FormField
-                        control={form.control}
-                        name={`items.${index}.discount`}
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel className="text-xs">Discount</FormLabel>
-                            <FormControl>
-                              <Input type="number" step="0.01" placeholder="Discount" {...field} className="text-sm" onChange={e => field.onChange(parseFloat(e.target.value) || '')} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <div className="flex flex-col">
-                        <Label className="text-xs mb-1.5">Net Price</Label>
-                        <Input 
-                          readOnly 
-                          value={calculateNetPrice(watchedItems[index] || { quantity: 0, unitPrice: 0, discount: 0 }).toFixed(2)} 
-                          className="text-sm bg-muted/50 cursor-default" 
-                        />
-                      </div>
                     </div>
                     {fields.length > 1 && (
                        <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)} className="absolute top-1 right-1 text-destructive hover:text-destructive/80 h-7 w-7">
@@ -341,7 +306,7 @@ export function ExpenseForm() {
                   </div>
                 ))}
               </div>
-              <Button type="button" variant="outline" size="sm" onClick={() => append({ name: '', quantity: 1, unitPrice: 0, discount: 0 })} className="text-primary border-primary hover:bg-primary/5 mt-3">
+              <Button type="button" variant="outline" size="sm" onClick={() => append({ name: '', quantity: 1, netPrice: 0 })} className="text-primary border-primary hover:bg-primary/5 mt-3">
                 <PlusCircle size={16} className="mr-2" /> Add Item
               </Button>
             </div>

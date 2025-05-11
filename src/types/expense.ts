@@ -4,9 +4,9 @@ export interface ExpenseItem {
   id?: string; // for react-hook-form field array
   name: string;
   quantity: number;
-  unitPrice: number;
-  discount: number; // Amount, not percentage
-  netPrice: number; // Calculated: (quantity * unitPrice) - discount
+  // unitPrice: number; // REMOVED
+  // discount: number; // REMOVED
+  netPrice: number; // This is now the primary price field for the item
 }
 
 export const expenseCategories = ['food', 'travel', 'supplies', 'entertainment', 'other'] as const;
@@ -30,12 +30,13 @@ export interface Expense {
 
 export interface ExpenseFormData {
   company: string;
-  items: Array<{ // Keep id for hook form, but map to ExpenseItem without id for saving
+  items: Array<{
     id?: string;
     name: string;
     quantity: number | string; // string for input, number for processing
-    unitPrice: number | string; // string for input, number for processing
-    discount: number | string; // string for input, number for processing
+    // unitPrice: number | string; // REMOVED
+    // discount: number | string; // REMOVED
+    netPrice: number | string; // ADDED / Confirmed
   }>;
   category: ExpenseCategory;
   expenseDate: Date;

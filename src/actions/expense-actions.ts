@@ -27,23 +27,20 @@ const validatePaymentMethod = (aiPaymentMethod: string): PaymentMethod => {
 export async function processReceiptImage(photoDataUri: string): Promise<AIExtractReceiptDataOutput & { items: ExpenseItem[] } | { error: string }> {
   try {
     const input: ExtractReceiptDataInput = { photoDataUri };
-    const result = await extractReceiptData(input);
+    const result = await extractReceiptData(input); // AI now returns items with netPrice
 
     const processedItems: ExpenseItem[] = result.items.map(item => {
       const quantity = Number(item.quantity) || 1;
-      const unitPrice = Number(item.unitPrice) || 0;
-      const discount = Number(item.discount) || 0;
+      const netPrice = Number(item.netPrice) || 0;
       return {
         name: item.name,
         quantity,
-        unitPrice,
-        discount,
-        netPrice: (quantity * unitPrice) - discount,
+        netPrice,
       };
     });
     
     return {
-      ...result,
+      ...result, // contains company, category (raw), expenseDate (raw), paymentMethod (raw) from AI
       items: processedItems,
       category: validateCategory(result.category),
       paymentMethod: validatePaymentMethod(result.paymentMethod),
@@ -59,14 +56,11 @@ export async function saveExpense(data: ExpenseFormData): Promise<{ success: boo
   try {
     const items: ExpenseItem[] = data.items.map(item => {
       const quantity = Number(item.quantity) || 1;
-      const unitPrice = Number(item.unitPrice) || 0;
-      const discount = Number(item.discount) || 0;
+      const netPrice = Number(item.netPrice) || 0;
       return {
         name: item.name,
         quantity,
-        unitPrice,
-        discount,
-        netPrice: (quantity * unitPrice) - discount,
+        netPrice,
       };
     });
 

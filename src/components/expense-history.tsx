@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { getExpenses } from '@/actions/expense-actions';
-import type { Expense, ExpenseItem } from '@/types/expense';
+import type { Expense } from '@/types/expense'; // ExpenseItem is implicitly used via Expense
 import { CategoryIcon } from './category-icon';
 import { format } from 'date-fns';
 import { RefreshCw, Loader2, CreditCard, HandCoins, Globe, Package } from 'lucide-react';
@@ -38,7 +38,6 @@ export function ExpenseHistory() {
   const fetchExpenses = async () => {
     setIsLoading(true);
     const fetchedExpenses = await getExpenses();
-    // Firestore Timestamps are already converted to Date objects in getExpenses action
     setExpenses(fetchedExpenses);
     setIsLoading(false);
   };
@@ -121,8 +120,6 @@ export function ExpenseHistory() {
                         <TableRow className="text-xs">
                           <TableHead>Item</TableHead>
                           <TableHead className="text-center">Qty</TableHead>
-                          <TableHead className="text-right">Unit Price</TableHead>
-                          <TableHead className="text-right">Discount</TableHead>
                           <TableHead className="text-right">Net Price</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -131,8 +128,6 @@ export function ExpenseHistory() {
                           <TableRow key={index} className="text-xs">
                             <TableCell className="font-medium py-1.5">{item.name}</TableCell>
                             <TableCell className="text-center py-1.5">{item.quantity}</TableCell>
-                            <TableCell className="text-right py-1.5">${item.unitPrice.toFixed(2)}</TableCell>
-                            <TableCell className="text-right py-1.5 text-red-500">-${item.discount.toFixed(2)}</TableCell>
                             <TableCell className="text-right font-medium py-1.5">${item.netPrice.toFixed(2)}</TableCell>
                           </TableRow>
                         ))}

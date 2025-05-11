@@ -29,9 +29,7 @@ const ExtractReceiptDataOutputSchema = z.object({
     z.object({
       name: z.string().describe('The name of the item.'),
       quantity: z.number().describe('The quantity of the item. Default to 1 if not specified.'),
-      unitPrice: z.number().describe('The price per unit of the item.'),
-      discount: z.number().optional().default(0).describe('The discount amount for this item. Default to 0 if not specified.'),
-      // netPrice: z.number().describe('The final price for this item after discount (quantity * unitPrice - discount).'), // This will be calculated
+      netPrice: z.number().describe('The final price for this specific line item as it appears on the receipt, after any item-specific discounts or considerations. This is not the subtotal or total of the receipt.'),
     })
   ).describe('A list of items with their details.'),
   category: z.enum(expenseCategories).describe(`The category of the expense. Must be one of: ${expenseCategories.join(', ')}`),
@@ -41,13 +39,8 @@ const ExtractReceiptDataOutputSchema = z.object({
 export type ExtractReceiptDataOutput = z.infer<typeof ExtractReceiptDataOutputSchema>;
 
 export async function extractReceiptData(input: ExtractReceiptDataInput): Promise<ExtractReceiptDataOutput> {
-  const result = await extractReceiptDataFlow(input);
-  // Calculate netPrice for each item
-  const itemsWithNetPrice = result.items.map(item => ({
-    ...item,
-    netPrice: (item.quantity * item.unitPrice) - (item.discount || 0)
-  }));
-  return { ...result, items: itemsWithNetPrice };
+  // The flow now directly returns items with netPrice. No further calculation needed here.
+  return extractReceiptDataFlow(input);
 }
 
 const extractReceiptDataPrompt = ai.definePrompt({
@@ -61,13 +54,12 @@ const extractReceiptDataPrompt = ai.definePrompt({
   - Items: A list of items purchased. For each item, extract:
     - name: The name of the item.
     - quantity: The quantity of the item. If not explicitly mentioned, assume 1.
-    - unitPrice: The price for a single unit of the item.
-    - discount: Any discount applied specifically to this item. If none, use 0.
+    - netPrice: The final price for this specific line item as it appears on the receipt (e.g., after any line-item specific discounts).
   - Category: The overall category of the expense. This must be one of: ${expenseCategories.join(', ')}. Infer this from the items and company.
   - Expense Date: The date shown on the receipt. Format as YYYY-MM-DD. If no date is clearly visible, use the current date.
   - Payment Method: The method of payment (e.g., card, cash, online). This must be one of: ${paymentMethods.join(', ')}. If not determinable, use 'other'.
 
-  Return the data in JSON format according to the defined schema. Ensure all numerical fields (quantity, unitPrice, discount) are numbers.
+  Return the data in JSON format according to the defined schema. Ensure all numerical fields (quantity, netPrice) are numbers.
 
   Receipt Image: {{media url=photoDataUri}}`,
 });
@@ -83,12 +75,11 @@ const extractReceiptDataFlow = ai.defineFlow(
     if (!output) {
       throw new Error("AI failed to return output for receipt data extraction.");
     }
-    // Ensure items have default quantity and discount if not provided
+    // Ensure items have default quantity if not provided and netPrice is a number
     const processedItems = output.items.map(item => ({
       name: item.name,
       quantity: item.quantity || 1,
-      unitPrice: item.unitPrice || 0,
-      discount: item.discount || 0,
+      netPrice: item.netPrice || 0,
     }));
     
     return {
