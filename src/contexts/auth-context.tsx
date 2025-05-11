@@ -8,7 +8,7 @@ import { onAuthStateChanged, type User as FirebaseUser } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import type { AppUser } from '@/types/user';
 import { toAppUser } from '@/types/user';
-import { Loader2 } from 'lucide-react';
+// import { Loader2 } from 'lucide-react'; // Loader2 no longer used directly here
 
 interface AuthContextType {
   user: AppUser | null;
@@ -44,19 +44,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe();
   }, []);
 
-  // Show a full-page loader while auth state is being determined initially
-  if (loading && typeof window !== 'undefined') {
-    // Check for window to prevent SSR issues with initial loading state
-    const path = window.location.pathname;
-    if (path !== '/login' && path !== '/register') {
-        return (
-            <div className="flex justify-center items-center h-screen w-screen bg-background">
-              <Loader2 className="h-12 w-12 animate-spin text-primary" />
-            </div>
-          );
-    }
-  }
-
+  // The AuthGuard component, a consumer of this context, already handles displaying a loader
+  // when `loading` is true. Removing the loader from here simplifies and fixes hydration issues
+  // as this loader was conditional on `typeof window !== 'undefined'`.
+  // Initial loading state before AuthGuard kicks in is handled by AuthGuard's own loader.
+  // If `loading` is true, `AuthGuard` will show its loader.
 
   return (
     <AuthContext.Provider value={{ user, loading, error }}>
@@ -64,3 +56,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     </AuthContext.Provider>
   );
 }
+
