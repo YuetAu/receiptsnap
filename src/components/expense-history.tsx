@@ -1,3 +1,4 @@
+
 // src/components/expense-history.tsx
 'use client';
 
@@ -14,11 +15,13 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { getExpenses } from '@/actions/expense-actions';
-import type { Expense } from '@/types/expense'; // ExpenseItem is implicitly used via Expense
+import type { Expense } from '@/types/expense';
 import { CategoryIcon } from './category-icon';
 import { format } from 'date-fns';
 import { RefreshCw, Loader2, CreditCard, HandCoins, Globe, Package } from 'lucide-react';
 import type { LucideProps } from 'lucide-react';
+import { useAuth } from '@/hooks/use-auth'; // Import useAuth
+import { useToast } from '@/hooks/use-toast';
 
 const PaymentMethodIcon = ({ method, ...props }: { method: Expense['paymentMethod'] } & LucideProps) => {
   switch (method) {
@@ -34,25 +37,52 @@ export function ExpenseHistory() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, startRefreshTransition] = useTransition();
+  const { user, loading: authLoading } = useAuth(); // Get authenticated user
+  const { toast } = useToast();
 
   const fetchExpenses = async () => {
+    if (!user) {
+      // This case should ideally not be hit frequently if AuthGuard is working
+      // but good to have a check.
+      setExpenses([]);
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
-    const fetchedExpenses = await getExpenses();
-    setExpenses(fetchedExpenses);
-    setIsLoading(false);
+    try {
+      const fetchedExpenses = await getExpenses(user.uid);
+      setExpenses(fetchedExpenses);
+    } catch (error) {
+        console.error("Failed to fetch expenses:", error);
+        toast({title: "Error", description: "Could not fetch expense history.", variant: "destructive"})
+        setExpenses([]);
+    } finally {
+        setIsLoading(false);
+    }
   };
   
   useEffect(() => {
-    fetchExpenses();
-  }, []);
+    if (!authLoading && user) {
+      fetchExpenses();
+    } else if (!authLoading && !user) {
+      // User is not logged in, clear expenses and stop loading
+      setExpenses([]);
+      setIsLoading(false);
+    }
+    // Effect dependencies: user, authLoading
+  }, [user, authLoading]);
 
   const handleRefresh = () => {
+    if (!user) {
+        toast({title: "Not Authenticated", description: "Please log in to refresh expenses.", variant: "destructive"})
+        return;
+    }
     startRefreshTransition(async () => {
       await fetchExpenses();
     });
   };
 
-  if (isLoading && expenses.length === 0) {
+  if (authLoading || (isLoading && expenses.length === 0 && user)) {
     return (
       <Card className="shadow-xl">
         <CardHeader className="flex flex-row items-center justify-between pb-4">
@@ -69,13 +99,26 @@ export function ExpenseHistory() {
     );
   }
 
+  if (!user && !authLoading) {
+     return (
+      <Card className="shadow-xl">
+        <CardHeader>
+          <CardTitle className="text-2xl font-semibold">Expense History</CardTitle>
+        </CardHeader>
+        <CardContent className="text-center py-8">
+          <p className="text-muted-foreground text-lg">Please log in to view your expense history.</p>
+        </CardContent>
+      </Card>
+     );
+  }
+
 
   return (
     <Card className="shadow-xl w-full">
       <CardHeader className="flex flex-row items-center justify-between pb-4">
         <CardTitle className="text-2xl font-semibold">Expense History</CardTitle>
-        <Button variant="outline" size="icon" onClick={handleRefresh} disabled={isRefreshing || (isLoading && expenses.length > 0)}>
-          {isRefreshing || (isLoading && expenses.length > 0) ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+        <Button variant="outline" size="icon" onClick={handleRefresh} disabled={isRefreshing || isLoading || !user}>
+          {isRefreshing || isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
         </Button>
       </CardHeader>
       <CardContent>
@@ -146,3 +189,4 @@ export function ExpenseHistory() {
     </Card>
   );
 }
+

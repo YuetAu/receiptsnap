@@ -1,7 +1,16 @@
+
+// src/app/page.tsx
+'use client'; // page.tsx now needs to be client component for AuthGuard HOC or similar patterns
+
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ExpenseForm } from "@/components/expense-form";
 import { ExpenseHistory } from "@/components/expense-history";
 import { FilePlus2, History } from "lucide-react";
+
+// AuthGuard will handle redirect if not logged in.
+// If you prefer specific content for non-logged-in users on this page,
+// you'd use useAuth() here and conditionally render.
+// For simplicity, AuthGuard handles the protection.
 
 export default function HomePage() {
   return (
@@ -25,3 +34,4 @@ export default function HomePage() {
     </div>
   );
 }
+

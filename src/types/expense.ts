@@ -1,12 +1,11 @@
+
 import type { Timestamp } from "firebase/firestore";
 
 export interface ExpenseItem {
   id?: string; // for react-hook-form field array
   name: string;
   quantity: number;
-  // unitPrice: number; // REMOVED
-  // discount: number; // REMOVED
-  netPrice: number; // This is now the primary price field for the item
+  netPrice: number; 
 }
 
 export const expenseCategories = ['food', 'travel', 'supplies', 'entertainment', 'other'] as const;
@@ -17,26 +16,24 @@ export type PaymentMethod = typeof paymentMethods[number];
 
 export interface Expense {
   id?: string; // Firestore document ID
+  userId: string; // ID of the user who created the expense
   company: string;
   items: ExpenseItem[];
   category: ExpenseCategory;
-  totalAmount: number; // Sum of all item netPrices
+  totalAmount: number; 
   expenseDate: Timestamp;
   paymentMethod: PaymentMethod;
-  // receiptImageUrl?: string | null; // Optional: if storing image URL
-  createdAt: Timestamp; // Timestamp of record creation
-  userId?: string; // For future authentication
+  createdAt: Timestamp; 
 }
 
 export interface ExpenseFormData {
+  // userId is not directly in the form data, but obtained from auth context
   company: string;
   items: Array<{
     id?: string;
     name: string;
-    quantity: number | string; // string for input, number for processing
-    // unitPrice: number | string; // REMOVED
-    // discount: number | string; // REMOVED
-    netPrice: number | string; // ADDED / Confirmed
+    quantity: number | string; 
+    netPrice: number | string; 
   }>;
   category: ExpenseCategory;
   expenseDate: Date;

@@ -1,9 +1,10 @@
+
 // src/components/expense-form.tsx
 'use client';
 
 import type { ChangeEvent } from 'react';
 import { useState, useEffect, useRef } from 'react';
-import { useForm, useFieldArray, Controller } from 'react-hook-form';
+import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import Image from 'next/image';
@@ -17,12 +18,13 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { useToast } from '@/hooks/use-toast';
 import { processReceiptImage, saveExpense } from '@/actions/expense-actions';
-import type { ExpenseFormData, ExpenseCategory, PaymentMethod, ExpenseItem } from '@/types/expense';
+import type { ExpenseFormData, ExpenseCategory, PaymentMethod } from '@/types/expense';
 import { expenseCategories, paymentMethods } from '@/types/expense';
 import { UploadCloud, PlusCircle, XCircle, Loader2, CalendarIcon } from 'lucide-react';
 import type { ExtractReceiptDataOutput as AIExtractReceiptDataOutput } from '@/ai/flows/extract-receipt-data';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/hooks/use-auth'; // Import useAuth
 
 const itemSchema = z.object({
   id: z.string().optional(),
@@ -52,6 +54,7 @@ export function ExpenseForm() {
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { user } = useAuth(); // Get authenticated user
 
   const form = useForm<ExpenseFormData>({
     resolver: zodResolver(expenseFormSchema),
@@ -98,7 +101,6 @@ export function ExpenseForm() {
     const reader = new FileReader();
     reader.onloadend = async () => {
       const dataUri = reader.result as string;
-      // Type assertion for AI result items to match ExpenseItem (which now only has name, quantity, netPrice)
       const result = await processReceiptImage(dataUri) as (AIExtractReceiptDataOutput & { items: Array<{name: string, quantity: number, netPrice: number}> }) | { error: string};
       setIsExtracting(false);
 
@@ -126,8 +128,12 @@ export function ExpenseForm() {
   };
 
   const onSubmit = async (data: ExpenseFormData) => {
+    if (!user) {
+      toast({ title: 'Not Authenticated', description: 'Please log in to save expenses.', variant: 'destructive' });
+      return;
+    }
     setIsSaving(true);
-    const result = await saveExpense(data);
+    const result = await saveExpense(user.uid, data); // Pass user.uid
     setIsSaving(false);
 
     if (result.success) {
@@ -370,7 +376,7 @@ export function ExpenseForm() {
             </div>
 
             <CardFooter className="p-0 pt-6">
-              <Button type="submit" disabled={isSaving || isExtracting} className="w-full text-lg py-3">
+              <Button type="submit" disabled={isSaving || isExtracting || !user} className="w-full text-lg py-3">
                 {isSaving ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : null}
                 Save Expense
               </Button>

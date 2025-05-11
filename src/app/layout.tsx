@@ -5,9 +5,9 @@ import { GeistMono } from 'geist/font/mono';
 import './globals.css';
 import { AppLayout } from '@/components/layout/app-layout';
 import { Toaster } from '@/components/ui/toaster';
+import { AuthProvider } from '@/contexts/auth-context';
+import { AuthGuard } from '@/components/auth/auth-guard';
 
-// GeistSans and GeistMono are objects from the 'geist/font' package.
-// We use their .variable property directly. No need to call them as functions.
 
 export const metadata: Metadata = {
   title: 'ReceiptSnap',
@@ -22,10 +22,14 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${GeistSans.variable} ${GeistMono.variable} antialiased`}>
-        <AppLayout>
-          {children}
-        </AppLayout>
-        <Toaster />
+        <AuthProvider>
+          <AuthGuard>
+            <AppLayout>
+              {children}
+            </AppLayout>
+          </AuthGuard>
+          <Toaster />
+        </AuthProvider>
       </body>
     </html>
   );

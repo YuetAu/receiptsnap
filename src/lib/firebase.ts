@@ -1,6 +1,8 @@
 
-import { initializeApp, getApps, FirebaseApp } from "firebase/app";
-import { getFirestore, Firestore } from "firebase/firestore";
+import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
+import { getFirestore, type Firestore } from "firebase/firestore";
+import { getAuth, type Auth } from "firebase/auth"; // Added Auth import
+
 // import { getStorage, FirebaseStorage } from "firebase/storage"; // Uncomment if using Firebase Storage
 
 const firebaseConfig = {
@@ -20,6 +22,7 @@ if (!getApps().length) {
 }
 
 const db: Firestore = getFirestore(app);
+const auth: Auth = getAuth(app); // Initialize Auth
 // const storage: FirebaseStorage = getStorage(app); // Uncomment if using Firebase Storage
 
-export { app, db /*, storage*/ };
+export { app, db, auth /*, storage*/ }; // Export auth
