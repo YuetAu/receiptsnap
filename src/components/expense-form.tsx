@@ -24,7 +24,7 @@ import type { ExtractReceiptDataOutput as AIExtractReceiptDataOutput } from '@/a
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/use-auth'; 
-import { auth } from '@/lib/firebase'; // Direct import of auth
+import { auth } from '@/lib/firebase'; // Direct import of auth for currentUser
 
 const itemSchema = z.object({
   id: z.string().optional(),
@@ -134,7 +134,15 @@ export function ExpenseForm() {
     }
     setIsSaving(true);
     try {
-      const idToken = await auth.currentUser.getIdToken();
+      // Force refresh the token to ensure it's not stale
+      const idToken = await auth.currentUser.getIdToken(true); 
+
+      if (!idToken) {
+        toast({ title: 'Authentication Error', description: 'Could not retrieve user session. Please try logging in again.', variant: 'destructive' });
+        setIsSaving(false);
+        return;
+      }
+
       const result = await saveExpense(idToken, data); 
 
       if (result.success) {
