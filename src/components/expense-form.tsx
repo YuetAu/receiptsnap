@@ -132,6 +132,7 @@ export function ExpenseForm() {
       toast({ title: 'Not Authenticated', description: 'Please log in to save expenses.', variant: 'destructive' });
       return;
     }
+    toast({title: 'Saving...', description: 'You are '+user.uid})
     setIsSaving(true);
     const result = await saveExpense(user.uid, data); // Pass user.uid
     setIsSaving(false);
