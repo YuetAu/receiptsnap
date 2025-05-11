@@ -24,6 +24,7 @@ import type { ExtractReceiptDataOutput as AIExtractReceiptDataOutput } from '@/a
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/use-auth'; 
+import { auth } from '@/lib/firebase'; // Direct import of auth
 
 const itemSchema = z.object({
   id: z.string().optional(),
@@ -127,7 +128,7 @@ export function ExpenseForm() {
   };
 
   const onSubmit = async (data: ExpenseFormData) => {
-    if (!user || !auth.currentUser) { // auth is from firebase client sdk
+    if (!user || !auth.currentUser) { 
       toast({ title: 'Not Authenticated', description: 'Please log in to save expenses.', variant: 'destructive' });
       return;
     }
@@ -161,14 +162,7 @@ export function ExpenseForm() {
     }
   };
   
-  // Need to import auth from firebase client for getIdToken
-  let auth: any; // placeholder for firebase auth instance
   useEffect(() => {
-    // Dynamically import firebase auth to avoid SSR issues if not already handled
-    import('@/lib/firebase').then(firebaseModule => {
-      auth = firebaseModule.auth;
-    });
-
     return () => {
       if (imagePreviewUrl && imagePreviewUrl.startsWith('blob:')) {
         URL.revokeObjectURL(imagePreviewUrl);

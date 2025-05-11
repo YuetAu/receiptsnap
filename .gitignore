@@ -51,3 +51,6 @@ local-*.json
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+
+# Service Account
+service-account.json
