@@ -11,19 +11,24 @@ if (!process.env.NEXT_PUBLIC_FIREBASE_API_KEY) {
   );
 }
 
-// Optional: Warn if other critical variables are missing, but API key is primary for this error.
-if (!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) {
-  console.warn(
-    "Firebase Project ID (NEXT_PUBLIC_FIREBASE_PROJECT_ID) is not defined. " +
-    "Please ensure it is set in your .env.local file."
+const clientProjectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+
+if (!clientProjectId) {
+  console.error(
+    "CRITICAL ERROR: Firebase Project ID (NEXT_PUBLIC_FIREBASE_PROJECT_ID) is not defined in .env.local. " +
+    "This is required for Firebase to function correctly."
   );
+  // Optionally, throw an error here if you want to halt execution
+  // throw new Error("NEXT_PUBLIC_FIREBASE_PROJECT_ID is not set.");
+} else {
+  console.log(`[Firebase Client] Initializing with Project ID: ${clientProjectId}. Ensure this matches the Admin SDK project_id.`);
 }
 
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  projectId: clientProjectId,
   storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,

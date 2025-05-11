@@ -80,6 +80,7 @@ This is a Next.js application that allows users to track expenses by manually en
         ```
         *   **Important:** `NEXT_PUBLIC_` prefix is necessary for these variables to be exposed to the client-side by Next.js.
         *   **Troubleshooting `auth/invalid-api-key`**: If you see this error, double-check that `NEXT_PUBLIC_FIREBASE_API_KEY` in your `.env.local` file is correct and that you have restarted your Next.js development server (`npm run dev`) after creating or modifying the `.env.local` file. Environment variables are loaded at build time.
+        *   **VERY IMPORTANT for `auth/argument-error` or `Invalid ID token` errors:** Ensure the `NEXT_PUBLIC_FIREBASE_PROJECT_ID` in your `.env.local` file **EXACTLY MATCHES** the `project_id` found in your Firebase Admin SDK service account JSON file (see next step). A mismatch here is a common cause of ID token verification failures. For example, if your service account file shows `"project_id": "my-awesome-project-123"`, then your `.env.local` must have `NEXT_PUBLIC_FIREBASE_PROJECT_ID="my-awesome-project-123"`.
 
 5.  **Set up Firebase Admin SDK (Server-Side):**
     *   The application uses the Firebase Admin SDK for server-side actions like securely writing to Firestore on behalf of an authenticated user.
@@ -96,6 +97,7 @@ This is a Next.js application that allows users to track expenses by manually en
             ```
             *Replace `./path/to/your-service-account-file.json` with the actual path to your downloaded file.*
             *The Firebase Admin SDK will automatically use this environment variable to initialize.*
+        6.  **Verify Project ID Match:** Double-check that the `project_id` field inside your downloaded service account JSON file matches the `NEXT_PUBLIC_FIREBASE_PROJECT_ID` you set for the client-side configuration. They must be for the same Firebase project.
 
 6.  **Set up Genkit (for AI features):**
     *   This project uses Google's Gemini model via Genkit for AI-powered receipt data extraction.
@@ -129,7 +131,7 @@ You need to run two development servers concurrently: one for the Next.js applic
     # or
     yarn dev
     ```
-    This will typically start the app on `http://localhost:9002`.
+    This will typically start the app on `http://localhost:9002`. Check the browser console and server terminal for logs related to Firebase Project IDs if you encounter authentication issues.
 
 2.  **Run the Genkit development server (in a separate terminal):**
     ```bash
@@ -206,4 +208,3 @@ Ensure all necessary environment variables (including `GOOGLE_APPLICATION_CREDEN
 -   Implement data visualization/dashboard for expenses.
 -   Write unit and integration tests.
 -   Improve accessibility (ARIA attributes, keyboard navigation).
-```
