@@ -14,13 +14,26 @@ export function AuthGuard({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
   useEffect(() => {
-    if (!loading && !user && pathname !== '/login' && pathname !== '/register') {
-      router.push('/login');
+    if (!loading) {
+      if (!user && pathname !== '/login' && pathname !== '/register') {
+        router.push('/login');
+      } else if (user && (pathname === '/login' || pathname === '/register')) {
+        router.push('/');
+      }
     }
   }, [user, loading, router, pathname]);
 
-  if (loading || (!user && pathname !== '/login' && pathname !== '/register')) {
-    // Show loader if loading, or if not authenticated and not on auth pages
+  if (loading) {
+    // Show loader if auth state is still loading
+    return (
+      <div className="flex justify-center items-center h-screen">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!user && pathname !== '/login' && pathname !== '/register') {
+    // Still show loader while redirecting to login
      return (
       <div className="flex justify-center items-center h-screen">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -28,10 +41,9 @@ export function AuthGuard({ children }: { children: ReactNode }) {
     );
   }
   
-  // If user is logged in and tries to access login/register, redirect to home
   if (user && (pathname === '/login' || pathname === '/register')) {
-    router.push('/');
-    return ( // Return loader while redirecting
+    // Still show loader while redirecting to home
+    return ( 
         <div className="flex justify-center items-center h-screen">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
@@ -41,3 +53,4 @@ export function AuthGuard({ children }: { children: ReactNode }) {
 
   return <>{children}</>;
 }
+
