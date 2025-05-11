@@ -1,7 +1,7 @@
 // src/actions/expense-actions.ts
 'use server';
 
-import admin from 'firebase-admin'; // Added for accessing admin app details
+import admin from 'firebase-admin'; 
 import { getAdminDb, getAdminAuth } from '@/lib/firebaseAdmin';
 import { db } from '@/lib/firebase'; 
 import type { Expense, ExpenseFormData, ExpenseItem, ExpenseCategory, PaymentMethod } from '@/types/expense';
@@ -26,6 +26,45 @@ const validatePaymentMethod = (aiPaymentMethod: string): PaymentMethod => {
   }
   return 'other';
 }
+
+interface AdminProjectDetails {
+  projectId: string;
+  errorHint: string;
+}
+
+function getAdminProjectDetails(): AdminProjectDetails {
+  let projectId = "N/A (Admin SDK project ID not available)";
+  let errorHint = "";
+  try {
+    const currentAdminApp = admin.apps.length > 0 ? admin.apps[0] : null;
+    if (currentAdminApp && currentAdminApp.options && currentAdminApp.options.projectId) {
+      projectId = currentAdminApp.options.projectId as string;
+    } else {
+      if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+        errorHint = "GOOGLE_APPLICATION_CREDENTIALS env var not set. ";
+      } else if (admin.apps.length === 0) {
+        errorHint = "Firebase Admin SDK potentially not initialized (admin.apps is empty). Check server logs for GOOGLE_APPLICATION_CREDENTIALS path/permission issues. ";
+      } else {
+        errorHint = "Admin SDK initialized but no projectId found. Check service account JSON validity. ";
+      }
+      // Fallback for project ID from FIREBASE_CONFIG (often in Firebase environments)
+      if (process.env.FIREBASE_CONFIG) {
+        try {
+            const fbConfig = JSON.parse(process.env.FIREBASE_CONFIG);
+            if (fbConfig.projectId) {
+                projectId = fbConfig.projectId;
+                errorHint = projectId === "N/A (Admin SDK project ID not available)" ? errorHint : ""; // Clear hint if projectId found this way
+            }
+        } catch(e) {/*ignore*/ }
+      }
+    }
+  } catch (e) {
+    console.error("Failed to retrieve admin project ID for error reporting (this is not the ID token error itself):", e);
+    errorHint = "Error retrieving admin project ID. ";
+  }
+  return { projectId, errorHint };
+}
+
 
 export async function processReceiptImage(photoDataUri: string): Promise<AIExtractReceiptDataOutput & { items: ExpenseItem[] } | { error: string }> {
   try {
@@ -60,8 +99,14 @@ export async function saveExpense(idToken: string, data: ExpenseFormData): Promi
   const adminDb = getAdminDb();
 
   if (!adminAuth || !adminDb) {
-    console.error("saveExpense: Firebase Admin SDK not initialized correctly on the server.");
-    return { success: false, error: "Firebase Admin SDK not initialized correctly on the server." };
+    let errorMsg = "Firebase Admin SDK not initialized correctly on the server.";
+    if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      errorMsg += " GOOGLE_APPLICATION_CREDENTIALS environment variable is not set. Please check your .env.local file and restart the server.";
+    } else {
+      errorMsg += " Check server logs for Firebase Admin initialization errors related to your service account file.";
+    }
+    console.error("saveExpense:", errorMsg);
+    return { success: false, error: errorMsg };
   }
 
   if (!idToken || typeof idToken !== 'string' || idToken.trim() === '') {
@@ -109,17 +154,13 @@ export async function saveExpense(idToken: string, data: ExpenseFormData): Promi
       errorMessage = 'Session expired. Please log in again.';
     } else if (error.code === 'auth/argument-error' || 
                (error.message && (error.message.toLowerCase().includes('verifyidtokenrequest') || error.message.toLowerCase().includes('invalid format') || error.message.toLowerCase().includes('invalid token')))) {
-      let adminProjectId = "N/A (Admin SDK project ID not available)";
-      try {
-        if (admin.apps.length > 0 && admin.apps[0] && admin.apps[0]!.options.projectId) {
-          adminProjectId = admin.apps[0]!.options.projectId as string;
-        }
-      } catch (e) {
-        console.error("Failed to retrieve admin project ID for error reporting:", e);
-      }
+      
+      const adminDetails = getAdminProjectDetails();
       const clientProjectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'MISSING_CLIENT_ENV_VAR';
-      console.error(`saveExpense: verifyIdToken failed. Client Project ID (from env): ${clientProjectId}. Admin SDK Project ID: ${adminProjectId}. Token (first 20 chars): ${idToken ? idToken.substring(0,20) : "N/A"}... Token length: ${idToken ? idToken.length : "N/A"}. Full error:`, error.message);
-      errorMessage = `Invalid ID token. Client Project ID: ${clientProjectId}. Admin SDK Project ID: ${adminProjectId}. Please ensure these match. If they do, the token might be malformed. Try logging in again.`;
+      const detailedAdminError = `${adminDetails.errorHint}Client Project ID (from env): ${clientProjectId}. Admin SDK Project ID: ${adminDetails.projectId}.`;
+      
+      console.error(`saveExpense: verifyIdToken failed. ${detailedAdminError} Ensure client/admin project IDs match and Admin SDK is properly initialized (check GOOGLE_APPLICATION_CREDENTIALS in .env.local and server logs). Token (first 20 chars): ${idToken ? idToken.substring(0,20) : "N/A"}... Token length: ${idToken ? idToken.length : "N/A"}. Full error:`, error.message);
+      errorMessage = `Invalid ID token. ${detailedAdminError} If IDs match and Admin SDK seems fine, the token might be malformed. Try logging in again.`;
     } else if (error.code === 'permission-denied' || (error.message && error.message.toLowerCase().includes('permission denied'))) {
         errorMessage = 'Firestore permission denied. Check your security rules and Admin SDK setup.';
     } else if (error.message) {
@@ -166,7 +207,11 @@ export async function createCompany(idToken: string, companyName: string): Promi
   const adminDb = getAdminDb();
 
   if (!adminAuth || !adminDb) {
-    return { success: false, error: "Firebase Admin SDK not initialized." };
+     let errorMsg = "Firebase Admin SDK not initialized correctly.";
+    if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      errorMsg += " GOOGLE_APPLICATION_CREDENTIALS env var not set.";
+    }
+    return { success: false, error: errorMsg };
   }
   if (!idToken || typeof idToken !== 'string' || idToken.trim() === '') {
     console.error("createCompany: ID token was not provided, not a string, or empty.");
@@ -196,15 +241,11 @@ export async function createCompany(idToken: string, companyName: string): Promi
      if (error.code === 'auth/id-token-expired') {
       errorMessage = 'Session expired. Please log in again.';
     } else if (error.code === 'auth/argument-error') {
-       let adminProjectId = "N/A";
-        try {
-          if (admin.apps.length > 0 && admin.apps[0] && admin.apps[0]!.options.projectId) {
-            adminProjectId = admin.apps[0]!.options.projectId as string;
-          }
-        } catch (e) { /* ignore */ }
+        const adminDetails = getAdminProjectDetails();
         const clientProjectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'MISSING_CLIENT_ENV_VAR';
-       console.error(`createCompany: verifyIdToken failed. Client Project ID: ${clientProjectId}. Admin SDK Project ID: ${adminProjectId}. Token (first 20): ${idToken ? idToken.substring(0,20) : "N/A"}`);
-      errorMessage = `Invalid ID token. Client Project ID: ${clientProjectId}. Admin SDK Project ID: ${adminProjectId}. Check for mismatch.`;
+        const detailedAdminError = `${adminDetails.errorHint}Client Project ID: ${clientProjectId}. Admin SDK Project ID: ${adminDetails.projectId}.`;
+        console.error(`createCompany: verifyIdToken failed. ${detailedAdminError} Token (first 20): ${idToken ? idToken.substring(0,20) : "N/A"}`);
+        errorMessage = `Invalid ID token. ${detailedAdminError} Check for mismatch or Admin SDK init issues.`;
     } else if (error.message) {
       errorMessage = error.message;
     }
@@ -218,7 +259,11 @@ export async function sendInvitation(idToken: string, companyId: string, invitee
   const adminDb = getAdminDb();
 
   if (!adminAuth || !adminDb) {
-    return { success: false, error: "Firebase Admin SDK not initialized." };
+    let errorMsg = "Firebase Admin SDK not initialized correctly.";
+    if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      errorMsg += " GOOGLE_APPLICATION_CREDENTIALS env var not set.";
+    }
+    return { success: false, error: errorMsg };
   }
    if (!idToken || typeof idToken !== 'string' || idToken.trim() === '') {
     console.error("sendInvitation: ID token was not provided, not a string, or empty.");
@@ -265,15 +310,11 @@ export async function sendInvitation(idToken: string, companyId: string, invitee
     if (error.code === 'auth/id-token-expired') {
       errorMessage = 'Session expired. Please log in again.';
     } else if (error.code === 'auth/argument-error') {
-      let adminProjectId = "N/A";
-      try {
-        if (admin.apps.length > 0 && admin.apps[0] && admin.apps[0]!.options.projectId) {
-          adminProjectId = admin.apps[0]!.options.projectId as string;
-        }
-      } catch (e) { /* ignore */ }
+      const adminDetails = getAdminProjectDetails();
       const clientProjectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'MISSING_CLIENT_ENV_VAR';
-      console.error(`sendInvitation: verifyIdToken failed. Client Project ID: ${clientProjectId}. Admin SDK Project ID: ${adminProjectId}. Token (first 20): ${idToken ? idToken.substring(0,20) : "N/A"}`);
-      errorMessage = `Invalid ID token. Client Project ID: ${clientProjectId}. Admin SDK Project ID: ${adminProjectId}. Check for mismatch.`;
+      const detailedAdminError = `${adminDetails.errorHint}Client Project ID: ${clientProjectId}. Admin SDK Project ID: ${adminDetails.projectId}.`;
+      console.error(`sendInvitation: verifyIdToken failed. ${detailedAdminError} Token (first 20): ${idToken ? idToken.substring(0,20) : "N/A"}`);
+      errorMessage = `Invalid ID token. ${detailedAdminError} Check for mismatch or Admin SDK init issues.`;
     } else if (error.code === 'auth/user-not-found' && error.message.includes(inviteeEmail)) {
       // This is fine for creating an invitation for a new user.
       // The error message will be handled by the generic clause if it's not this specific case.
@@ -289,7 +330,11 @@ export async function acceptInvitation(idToken: string, invitationId: string): P
   const adminDb = getAdminDb();
 
   if (!adminAuth || !adminDb) {
-    return { success: false, error: "Firebase Admin SDK not initialized." };
+    let errorMsg = "Firebase Admin SDK not initialized correctly.";
+    if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      errorMsg += " GOOGLE_APPLICATION_CREDENTIALS env var not set.";
+    }
+    return { success: false, error: errorMsg };
   }
   if (!idToken || typeof idToken !== 'string' || idToken.trim() === '') {
     console.error("acceptInvitation: ID token was not provided, not a string, or empty.");
@@ -344,15 +389,11 @@ export async function acceptInvitation(idToken: string, invitationId: string): P
      if (error.code === 'auth/id-token-expired') {
       errorMessage = 'Session expired. Please log in again.';
     } else if (error.code === 'auth/argument-error') {
-      let adminProjectId = "N/A";
-      try {
-        if (admin.apps.length > 0 && admin.apps[0] && admin.apps[0]!.options.projectId) {
-          adminProjectId = admin.apps[0]!.options.projectId as string;
-        }
-      } catch (e) { /* ignore */ }
+      const adminDetails = getAdminProjectDetails();
       const clientProjectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'MISSING_CLIENT_ENV_VAR';
-      console.error(`acceptInvitation: verifyIdToken failed. Client Project ID: ${clientProjectId}. Admin SDK Project ID: ${adminProjectId}. Token (first 20): ${idToken ? idToken.substring(0,20) : "N/A"}`);
-      errorMessage = `Invalid ID token. Client Project ID: ${clientProjectId}. Admin SDK Project ID: ${adminProjectId}. Check for mismatch.`;
+      const detailedAdminError = `${adminDetails.errorHint}Client Project ID: ${clientProjectId}. Admin SDK Project ID: ${adminDetails.projectId}.`;
+      console.error(`acceptInvitation: verifyIdToken failed. ${detailedAdminError} Token (first 20): ${idToken ? idToken.substring(0,20) : "N/A"}`);
+      errorMessage = `Invalid ID token. ${detailedAdminError} Check for mismatch or Admin SDK init issues.`;
     } else if (error.message) {
       errorMessage = error.message;
     }
