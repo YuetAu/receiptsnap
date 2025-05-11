@@ -32,7 +32,7 @@ This is a Next.js application that allows users to track expenses by manually en
     *   **Enable Firebase Authentication:**
         *   In the Firebase console, go to **Authentication** (Build menu).
         *   Click on the "Sign-in method" tab.
-        *   Enable the **Email/Password** provider.
+        *   **VERY IMPORTANT:** Enable the **Email/Password** provider. If this is not enabled, you will encounter an `auth/operation-not-allowed` error when trying to register or log in.
     *   **Enable Firestore Database:**
         *   In the Firebase console, go to **Firestore Database** (Build menu).
         *   Click "Create database".
@@ -75,6 +75,7 @@ This is a Next.js application that allows users to track expenses by manually en
         NEXT_PUBLIC_FIREBASE_APP_ID="YOUR_APP_ID"
         ```
     *   **Important:** `NEXT_PUBLIC_` prefix is necessary for these variables to be exposed to the client-side by Next.js.
+    *   **Troubleshooting `auth/invalid-api-key`**: If you see this error, double-check that `NEXT_PUBLIC_FIREBASE_API_KEY` in your `.env.local` file is correct and that you have restarted your Next.js development server (`npm run dev`) after creating or modifying the `.env.local` file. Environment variables are loaded at build time.
 
 5.  **Set up Genkit (for AI features):**
     *   This project uses Google's Gemini model via Genkit. You'll need a Google Cloud project with the AI Platform API enabled and appropriate credentials.
