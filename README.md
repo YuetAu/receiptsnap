@@ -48,7 +48,9 @@ This is a Next.js application that allows users to track expenses by manually en
                   allow read, write: if request.auth != null && request.auth.uid == userId;
                 }
                 match /expenses/{expenseId} {
-                  allow read, write: if request.auth != null && request.auth.uid == resource.data.userId;
+                  allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+                  allow create: if request.auth != null && request.auth.uid == request.resource.data.userId;
+                  allow update, delete: if request.auth != null && request.auth.uid == resource.data.userId;
                 }
                 match /companies/{companyId} {
                   allow read: if request.auth != null; // Or more specific rules
