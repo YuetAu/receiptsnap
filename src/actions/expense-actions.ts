@@ -1,4 +1,3 @@
-
 // src/actions/expense-actions.ts
 'use server';
 
@@ -58,11 +57,11 @@ export async function saveExpense(userId: string, data: ExpenseFormData): Promis
   }
   try {
     const items: ExpenseItem[] = data.items.map(item => {
-      const quantity = Number(item.quantity) || 1;
-      const netPrice = Number(item.netPrice) || 0;
+      const quantity = Number(item.quantity) || 1; // Default to 1 if quantity is not a valid number or 0
+      const netPrice = Number(item.netPrice) || 0; // Default to 0 if netPrice is not a valid number
       return {
         name: item.name,
-        quantity,
+        quantity: quantity <= 0 ? 1 : quantity, // Ensure quantity is at least 1
         netPrice,
       };
     });
@@ -70,7 +69,7 @@ export async function saveExpense(userId: string, data: ExpenseFormData): Promis
     const totalAmount = items.reduce((sum, item) => sum + item.netPrice, 0);
     
     const expenseData: Omit<Expense, 'id' | 'createdAt'> & { createdAt: Timestamp, expenseDate: Timestamp } = {
-      userId, // Associate expense with the user
+      userId, 
       company: data.company,
       items,
       category: data.category,
@@ -84,8 +83,20 @@ export async function saveExpense(userId: string, data: ExpenseFormData): Promis
     revalidatePath('/'); 
     return { success: true };
   } catch (error) {
-    console.error("Error saving expense:", error);
-    return { success: false, error: "Failed to save expense." };
+    console.error("Error saving expense to Firestore:", error); // More detailed server log
+
+    let errorMessage = "Failed to save expense. Please try again.";
+    // Check if it's a FirebaseError-like object by looking for 'code' and 'message'
+    if (error instanceof Error) {
+        const firebaseError = error as any; // Cast to any to check for Firebase specific properties
+        if (firebaseError.code) {
+            errorMessage = `Failed to save expense: ${firebaseError.message} (Code: ${firebaseError.code})`;
+        } else {
+            errorMessage = `Failed to save expense: ${firebaseError.message}`;
+        }
+    }
+    
+    return { success: false, error: errorMessage };
   }
 }
 
@@ -96,7 +107,6 @@ export async function getExpenses(userId: string): Promise<Expense[]> {
   }
   try {
     const expensesCol = collection(db, 'expenses');
-    // Filter expenses by userId
     const q = query(
         expensesCol, 
         where('userId', '==', userId), 
