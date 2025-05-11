@@ -1,35 +1,53 @@
+// src/actions/expense-actions.ts
 'use server';
 
 import { db } from '@/lib/firebase';
-import type { Expense, ExpenseFormData, ExpenseItem } from '@/types/expense';
-import { extractReceiptData, type ExtractReceiptDataInput, type ExtractReceiptDataOutput } from '@/ai/flows/extract-receipt-data';
+import type { Expense, ExpenseFormData, ExpenseItem, ExpenseCategory, PaymentMethod } from '@/types/expense';
+import { extractReceiptData, type ExtractReceiptDataInput } from '@/ai/flows/extract-receipt-data';
+import type { ExtractReceiptDataOutput as AIExtractReceiptDataOutput } from '@/ai/flows/extract-receipt-data'; // Renamed to avoid conflict
 import { addDoc, collection, getDocs, query, orderBy, Timestamp, serverTimestamp } from 'firebase/firestore';
 import { revalidatePath } from 'next/cache';
+import { expenseCategories, paymentMethods } from '@/types/expense';
 
 // Helper function to validate and convert AI output category
-const validateCategory = (aiCategory: string): Expense['category'] => {
-  const validCategories = ['food', 'travel', 'supplies', 'entertainment', 'other'] as const;
-  if (validCategories.includes(aiCategory as Expense['category'])) {
-    return aiCategory as Expense['category'];
+const validateCategory = (aiCategory: string): ExpenseCategory => {
+  if (expenseCategories.includes(aiCategory as ExpenseCategory)) {
+    return aiCategory as ExpenseCategory;
   }
   return 'other'; // Default to 'other' if AI category is not valid
 };
 
+const validatePaymentMethod = (aiPaymentMethod: string): PaymentMethod => {
+  if (paymentMethods.includes(aiPaymentMethod as PaymentMethod)) {
+    return aiPaymentMethod as PaymentMethod;
+  }
+  return 'other';
+}
 
-export async function processReceiptImage(photoDataUri: string): Promise<ExtractReceiptDataOutput | { error: string }> {
+export async function processReceiptImage(photoDataUri: string): Promise<AIExtractReceiptDataOutput & { items: ExpenseItem[] } | { error: string }> {
   try {
     const input: ExtractReceiptDataInput = { photoDataUri };
     const result = await extractReceiptData(input);
-    // Ensure items have price as number
-    const processedItems = result.items.map(item => ({
-      ...item,
-      price: Number(item.price) || 0 // Ensure price is a number, default to 0 if NaN
-    }));
+
+    const processedItems: ExpenseItem[] = result.items.map(item => {
+      const quantity = Number(item.quantity) || 1;
+      const unitPrice = Number(item.unitPrice) || 0;
+      const discount = Number(item.discount) || 0;
+      return {
+        name: item.name,
+        quantity,
+        unitPrice,
+        discount,
+        netPrice: (quantity * unitPrice) - discount,
+      };
+    });
     
     return {
       ...result,
       items: processedItems,
-      category: validateCategory(result.category)
+      category: validateCategory(result.category),
+      paymentMethod: validatePaymentMethod(result.paymentMethod),
+      expenseDate: result.expenseDate || new Date().toISOString().split('T')[0], // Ensure date is present
     };
   } catch (error) {
     console.error("Error processing receipt image:", error);
@@ -39,15 +57,30 @@ export async function processReceiptImage(photoDataUri: string): Promise<Extract
 
 export async function saveExpense(data: ExpenseFormData): Promise<{ success: boolean; error?: string }> {
   try {
-    const totalAmount = data.items.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
+    const items: ExpenseItem[] = data.items.map(item => {
+      const quantity = Number(item.quantity) || 1;
+      const unitPrice = Number(item.unitPrice) || 0;
+      const discount = Number(item.discount) || 0;
+      return {
+        name: item.name,
+        quantity,
+        unitPrice,
+        discount,
+        netPrice: (quantity * unitPrice) - discount,
+      };
+    });
+
+    const totalAmount = items.reduce((sum, item) => sum + item.netPrice, 0);
     
-    const expenseData: Omit<Expense, 'id' | 'createdAt'> & { createdAt: Timestamp } = {
+    const expenseData: Omit<Expense, 'id' | 'createdAt'> & { createdAt: Timestamp, expenseDate: Timestamp } = {
       company: data.company,
-      items: data.items.map(item => ({ name: item.name, price: Number(item.price) || 0 })),
+      items,
       category: data.category,
       totalAmount,
-      // userId: "anonymous", // Placeholder for future auth
+      expenseDate: Timestamp.fromDate(new Date(data.expenseDate)),
+      paymentMethod: data.paymentMethod,
       createdAt: serverTimestamp() as Timestamp, // Firestore will set this
+      // userId: "anonymous", // Placeholder for future auth
     };
 
     await addDoc(collection(db, 'expenses'), expenseData);
@@ -62,9 +95,17 @@ export async function saveExpense(data: ExpenseFormData): Promise<{ success: boo
 export async function getExpenses(): Promise<Expense[]> {
   try {
     const expensesCol = collection(db, 'expenses');
-    const q = query(expensesCol, orderBy('createdAt', 'desc'));
+    const q = query(expensesCol, orderBy('expenseDate', 'desc'), orderBy('createdAt', 'desc'));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Expense));
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return { 
+        id: doc.id,
+        ...data,
+        expenseDate: (data.expenseDate as Timestamp).toDate(), // Convert Timestamp to Date
+        createdAt: (data.createdAt as Timestamp).toDate(), // Convert Timestamp to Date
+      } as unknown as Expense; // Cast needed due to Timestamp to Date conversion
+    });
   } catch (error) {
     console.error("Error fetching expenses:", error);
     return [];

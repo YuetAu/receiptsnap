@@ -1,7 +1,8 @@
+// src/components/expense-form.tsx
 'use client';
 
 import type { ChangeEvent } from 'react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useForm, useFieldArray, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -12,18 +13,32 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 import { useToast } from '@/hooks/use-toast';
 import { processReceiptImage, saveExpense } from '@/actions/expense-actions';
-import type { ExpenseFormData, ExpenseItem, ExpenseCategory } from '@/types/expense';
-import { expenseCategories } from '@/types/expense';
-import { UploadCloud, PlusCircle, XCircle, Loader2 } from 'lucide-react';
-import type { ExtractReceiptDataOutput } from '@/ai/flows/extract-receipt-data';
+import type { ExpenseFormData, ExpenseCategory, PaymentMethod, ExpenseItem } from '@/types/expense';
+import { expenseCategories, paymentMethods } from '@/types/expense';
+import { UploadCloud, PlusCircle, XCircle, Loader2, CalendarIcon, Info } from 'lucide-react';
+import type { ExtractReceiptDataOutput as AIExtractReceiptDataOutput } from '@/ai/flows/extract-receipt-data';
+import { format } from 'date-fns';
+import { cn } from '@/lib/utils';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 const itemSchema = z.object({
+  id: z.string().optional(),
   name: z.string().min(1, 'Item name is required'),
-  price: z.preprocess(
+  quantity: z.preprocess(
     (val) => (typeof val === 'string' ? parseFloat(val) : val),
-    z.number().min(0, 'Price must be positive')
+    z.number().min(0.01, 'Quantity must be positive')
+  ),
+  unitPrice: z.preprocess(
+    (val) => (typeof val === 'string' ? parseFloat(val) : val),
+    z.number().min(0, 'Unit price must be non-negative')
+  ),
+  discount: z.preprocess(
+    (val) => (val === '' || val === null || val === undefined ? 0 : (typeof val === 'string' ? parseFloat(val) : val)),
+    z.number().min(0, 'Discount must be non-negative').optional().default(0)
   ),
 });
 
@@ -31,6 +46,8 @@ const expenseFormSchema = z.object({
   company: z.string().min(1, 'Company name is required'),
   items: z.array(itemSchema).min(1, 'At least one item is required'),
   category: z.enum(expenseCategories, { required_error: 'Category is required' }),
+  expenseDate: z.date({ required_error: 'Expense date is required' }),
+  paymentMethod: z.enum(paymentMethods, { required_error: 'Payment method is required' }),
 });
 
 export function ExpenseForm() {
@@ -39,13 +56,16 @@ export function ExpenseForm() {
   const [isExtracting, setIsExtracting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const form = useForm<ExpenseFormData>({
     resolver: zodResolver(expenseFormSchema),
     defaultValues: {
       company: '',
-      items: [{ name: '', price: 0 }],
+      items: [{ name: '', quantity: 1, unitPrice: 0, discount: 0 }],
       category: 'other',
+      expenseDate: new Date(),
+      paymentMethod: 'card',
     },
   });
 
@@ -53,6 +73,20 @@ export function ExpenseForm() {
     control: form.control,
     name: 'items',
   });
+
+  const watchedItems = form.watch('items');
+
+  const calculateNetPrice = (item: { quantity: number | string; unitPrice: number | string; discount: number | string; }) => {
+    const quantity = Number(item.quantity) || 0;
+    const unitPrice = Number(item.unitPrice) || 0;
+    const discount = Number(item.discount) || 0;
+    return (quantity * unitPrice) - discount;
+  };
+  
+  const calculateTotalExpense = () => {
+    return watchedItems.reduce((total, item) => total + calculateNetPrice(item), 0);
+  };
+
 
   const handleImageChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -63,7 +97,7 @@ export function ExpenseForm() {
         setImagePreviewUrl(reader.result as string);
       };
       reader.readAsDataURL(file);
-      form.reset(); // Reset form when new image is selected
+      // Do not reset form here, allow user to initiate extraction
     }
   };
 
@@ -83,11 +117,22 @@ export function ExpenseForm() {
       if ('error' in result) {
         toast({ title: 'Extraction Failed', description: result.error, variant: 'destructive' });
       } else {
+        const aiResult = result as AIExtractReceiptDataOutput & { items: ExpenseItem[] }; // Type assertion
         toast({ title: 'Extraction Successful', description: 'Data extracted from receipt.' });
+        
         form.reset({
-          company: result.company,
-          items: result.items.length > 0 ? result.items.map(item => ({ name: item.name, price: item.price })) : [{ name: '', price: 0 }],
-          category: result.category as ExpenseCategory,
+          company: aiResult.company,
+          items: aiResult.items.length > 0 
+            ? aiResult.items.map(item => ({ 
+                name: item.name, 
+                quantity: item.quantity, 
+                unitPrice: item.unitPrice,
+                discount: item.discount,
+              })) 
+            : [{ name: '', quantity: 1, unitPrice: 0, discount: 0 }],
+          category: aiResult.category as ExpenseCategory,
+          expenseDate: aiResult.expenseDate ? new Date(aiResult.expenseDate) : new Date(),
+          paymentMethod: aiResult.paymentMethod as PaymentMethod,
         });
       }
     };
@@ -101,18 +146,26 @@ export function ExpenseForm() {
 
     if (result.success) {
       toast({ title: 'Expense Saved', description: 'Your expense has been successfully saved.' });
-      form.reset();
+      form.reset({
+        company: '',
+        items: [{ name: '', quantity: 1, unitPrice: 0, discount: 0 }],
+        category: 'other',
+        expenseDate: new Date(),
+        paymentMethod: 'card',
+      });
       setImageFile(null);
       setImagePreviewUrl(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''; // Clear the file input
+      }
     } else {
       toast({ title: 'Save Failed', description: result.error, variant: 'destructive' });
     }
   };
   
   useEffect(() => {
-    // Clean up preview URL when component unmounts or imageFile changes
     return () => {
-      if (imagePreviewUrl) {
+      if (imagePreviewUrl && imagePreviewUrl.startsWith('blob:')) {
         URL.revokeObjectURL(imagePreviewUrl);
       }
     };
@@ -120,7 +173,7 @@ export function ExpenseForm() {
 
 
   return (
-    <Card className="w-full max-w-2xl mx-auto shadow-xl">
+    <Card className="w-full max-w-3xl mx-auto shadow-xl">
       <CardHeader>
         <CardTitle className="text-2xl font-semibold text-center">Add New Expense</CardTitle>
       </CardHeader>
@@ -128,111 +181,230 @@ export function ExpenseForm() {
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
             <div className="space-y-2">
-              <Label htmlFor="receipt-image" className="text-base font-medium">Receipt Image</Label>
+              <Label htmlFor="receipt-image" className="text-base font-medium">Receipt Image (Optional)</Label>
               <Input
                 id="receipt-image"
                 type="file"
                 accept="image/*"
-                capture="environment" // Suggests camera on mobile
+                capture="environment"
                 onChange={handleImageChange}
+                ref={fileInputRef}
                 className="file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
               />
             </div>
 
             {imagePreviewUrl && (
-              <div className="my-4 p-2 border border-dashed border-muted-foreground/50 rounded-md flex flex-col items-center">
-                <Image src={imagePreviewUrl} alt="Receipt Preview" width={200} height={300} className="rounded-md object-contain max-h-[300px]" data-ai-hint="receipt preview" />
+              <div className="my-4 p-4 border border-dashed border-muted-foreground/50 rounded-md flex flex-col items-center bg-secondary/30">
+                <Image src={imagePreviewUrl} alt="Receipt Preview" width={200} height={300} className="rounded-md object-contain max-h-[300px] border bg-background shadow-sm" data-ai-hint="receipt preview" />
                 <Button 
                   type="button" 
                   onClick={handleExtractData} 
                   disabled={isExtracting || !imageFile}
-                  className="mt-4 w-full sm:w-auto bg-accent hover:bg-accent/90 text-accent-foreground"
+                  className="mt-4 w-full sm:w-auto bg-accent hover:bg-accent/90 text-accent-foreground py-2.5"
                 >
                   {isExtracting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UploadCloud className="mr-2 h-4 w-4" />}
                   Extract Data from Image
                 </Button>
               </div>
             )}
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <FormField
+                control={form.control}
+                name="company"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-base">Company</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g., Starbucks" {...field} className="text-base" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="expenseDate"
+                render={({ field }) => (
+                  <FormItem className="flex flex-col">
+                    <FormLabel className="text-base">Expense Date</FormLabel>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <FormControl>
+                          <Button
+                            variant={"outline"}
+                            className={cn(
+                              "w-full pl-3 text-left font-normal text-base",
+                              !field.value && "text-muted-foreground"
+                            )}
+                          >
+                            {field.value ? (
+                              format(field.value, "PPP")
+                            ) : (
+                              <span>Pick a date</span>
+                            )}
+                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                          </Button>
+                        </FormControl>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={field.value}
+                          onSelect={field.onChange}
+                          disabled={(date) =>
+                            date > new Date() || date < new Date("1900-01-01")
+                          }
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
 
-            <FormField
-              control={form.control}
-              name="company"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="text-base">Company</FormLabel>
-                  <FormControl>
-                    <Input placeholder="e.g., Starbucks" {...field} className="text-base" />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
 
             <div>
               <Label className="text-base font-medium mb-2 block">Items</Label>
-              {fields.map((item, index) => (
-                <div key={item.id} className="flex gap-2 mb-2 items-start">
-                  <FormField
-                    control={form.control}
-                    name={`items.${index}.name`}
-                    render={({ field }) => (
-                      <FormItem className="flex-grow">
-                        <FormControl>
-                          <Input placeholder="Item name" {...field} className="text-sm"/>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
+              <div className="space-y-3">
+                {fields.map((item, index) => (
+                  <div key={item.id} className="p-3 border rounded-md bg-secondary/20 space-y-2 relative">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-3 gap-y-2">
+                      <FormField
+                        control={form.control}
+                        name={`items.${index}.name`}
+                        render={({ field }) => (
+                          <FormItem className="sm:col-span-2 md:col-span-1">
+                            <FormLabel className="text-xs">Name</FormLabel>
+                            <FormControl>
+                              <Input placeholder="Item name" {...field} className="text-sm"/>
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                       <FormField
+                        control={form.control}
+                        name={`items.${index}.quantity`}
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="text-xs">Quantity</FormLabel>
+                            <FormControl>
+                              <Input type="number" step="any" placeholder="Qty" {...field} className="text-sm" onChange={e => field.onChange(parseFloat(e.target.value) || '')} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name={`items.${index}.unitPrice`}
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="text-xs">Unit Price</FormLabel>
+                            <FormControl>
+                              <Input type="number" step="0.01" placeholder="Unit Price" {...field} className="text-sm" onChange={e => field.onChange(parseFloat(e.target.value) || '')} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name={`items.${index}.discount`}
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="text-xs">Discount</FormLabel>
+                            <FormControl>
+                              <Input type="number" step="0.01" placeholder="Discount" {...field} className="text-sm" onChange={e => field.onChange(parseFloat(e.target.value) || '')} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <div className="flex flex-col">
+                        <Label className="text-xs mb-1.5">Net Price</Label>
+                        <Input 
+                          readOnly 
+                          value={calculateNetPrice(watchedItems[index] || { quantity: 0, unitPrice: 0, discount: 0 }).toFixed(2)} 
+                          className="text-sm bg-muted/50 cursor-default" 
+                        />
+                      </div>
+                    </div>
+                    {fields.length > 1 && (
+                       <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)} className="absolute top-1 right-1 text-destructive hover:text-destructive/80 h-7 w-7">
+                        <XCircle size={18} />
+                      </Button>
                     )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name={`items.${index}.price`}
-                    render={({ field }) => (
-                      <FormItem className="w-1/3">
-                        <FormControl>
-                          <Input type="number" step="0.01" placeholder="Price" {...field} className="text-sm" />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  {fields.length > 1 && (
-                    <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)} className="mt-1 text-destructive hover:text-destructive/80">
-                      <XCircle size={20} />
-                    </Button>
-                  )}
-                </div>
-              ))}
-              <Button type="button" variant="outline" size="sm" onClick={() => append({ name: '', price: 0 })} className="text-primary border-primary hover:bg-primary/5">
+                  </div>
+                ))}
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => append({ name: '', quantity: 1, unitPrice: 0, discount: 0 })} className="text-primary border-primary hover:bg-primary/5 mt-3">
                 <PlusCircle size={16} className="mr-2" /> Add Item
               </Button>
             </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <FormField
+                control={form.control}
+                name="category"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-base">Category</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger className="text-base">
+                          <SelectValue placeholder="Select a category" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {expenseCategories.map(cat => (
+                          <SelectItem key={cat} value={cat} className="capitalize text-base">
+                            {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="paymentMethod"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-base">Payment Method</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger className="text-base">
+                          <SelectValue placeholder="Select payment method" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {paymentMethods.map(method => (
+                          <SelectItem key={method} value={method} className="capitalize text-base">
+                            {method.charAt(0).toUpperCase() + method.slice(1)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
 
-            <FormField
-              control={form.control}
-              name="category"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="text-base">Category</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
-                    <FormControl>
-                      <SelectTrigger className="text-base">
-                        <SelectValue placeholder="Select a category" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {expenseCategories.map(cat => (
-                        <SelectItem key={cat} value={cat} className="capitalize text-base">
-                          {cat.charAt(0).toUpperCase() + cat.slice(1)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <CardFooter className="p-0 pt-4">
+            <div className="pt-4 border-t mt-6">
+              <div className="flex justify-between items-center text-lg font-semibold">
+                <span>Total Expense:</span>
+                <span>${calculateTotalExpense().toFixed(2)}</span>
+              </div>
+            </div>
+
+            <CardFooter className="p-0 pt-6">
               <Button type="submit" disabled={isSaving || isExtracting} className="w-full text-lg py-3">
                 {isSaving ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : null}
                 Save Expense
