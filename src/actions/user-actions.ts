@@ -1,3 +1,4 @@
+
 // src/actions/user-actions.ts
 'use server';
 
@@ -54,4 +55,3 @@ export async function updateUserDisplayName(idToken: string, newDisplayName: str
     return { success: false, error: errorMessage };
   }
 }
-```
