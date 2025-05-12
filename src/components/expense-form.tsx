@@ -1,3 +1,4 @@
+
 // src/components/expense-form.tsx
 'use client';
 
@@ -17,7 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { useToast } from '@/hooks/use-toast';
 import { processReceiptImage, saveExpense } from '@/actions/expense-actions';
-import type { ExpenseFormData, ExpenseCategory, PaymentMethod } from '@/types/expense';
+import type { ExpenseFormData, ExpenseCategory, PaymentMethod, ExpenseStatus } from '@/types/expense'; // Added ExpenseStatus
 import { expenseCategories, paymentMethods } from '@/types/expense';
 import { UploadCloud, PlusCircle, XCircle, Loader2, CalendarIcon } from 'lucide-react';
 import type { ExtractReceiptDataOutput as AIExtractReceiptDataOutput } from '@/ai/flows/extract-receipt-data';
@@ -41,10 +42,12 @@ const itemSchema = z.object({
 
 const expenseFormSchema = z.object({
   company: z.string().min(1, 'Company name is required'),
+  companyId: z.string().nullable().optional(), // Added companyId
   items: z.array(itemSchema).min(1, 'At least one item is required'),
   category: z.enum(expenseCategories, { required_error: 'Category is required' }),
   expenseDate: z.date({ required_error: 'Expense date is required' }),
   paymentMethod: z.enum(paymentMethods, { required_error: 'Payment method is required' }),
+  status: z.enum(['pending', 'approved', 'rejected']).optional(), // Added status
 });
 
 export function ExpenseForm() {
@@ -52,6 +55,7 @@ export function ExpenseForm() {
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLogged, setIsLogged] = useState(false); 
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuth(); 
@@ -60,12 +64,28 @@ export function ExpenseForm() {
     resolver: zodResolver(expenseFormSchema),
     defaultValues: {
       company: '',
+      companyId: user?.companyId || null,
       items: [{ name: '', quantity: 1, netPrice: 0 }],
       category: 'other',
       expenseDate: new Date(),
       paymentMethod: 'card',
+      status: user?.companyId ? 'pending' : 'approved',
     },
   });
+  
+  // Update defaultValues when user context changes (e.g., after login or joining/leaving a company)
+  useEffect(() => {
+    if (user) {
+      form.reset({
+        ...form.getValues(), // Keep existing form values if any
+        companyId: user.companyId || null,
+        status: user.companyId ? 'pending' : 'approved',
+        // Potentially prefill company name if user has one
+        company: user.companyId && form.getValues().company === '' ? 'My Company' : form.getValues().company, // Example placeholder
+      });
+    }
+  }, [user, form]);
+
 
   const { fields, append, remove } = useFieldArray({
     control: form.control,
@@ -111,6 +131,7 @@ export function ExpenseForm() {
         
         form.reset({
           company: result.company,
+          companyId: user?.companyId || null, // Keep user's company context
           items: result.items.length > 0 
             ? result.items.map(item => ({ 
                 name: item.name, 
@@ -121,6 +142,7 @@ export function ExpenseForm() {
           category: result.category as ExpenseCategory,
           expenseDate: result.expenseDate ? new Date(result.expenseDate) : new Date(),
           paymentMethod: result.paymentMethod as PaymentMethod,
+          status: user?.companyId ? 'pending' : 'approved', // Set status based on company context
         });
       }
     };
@@ -135,7 +157,6 @@ export function ExpenseForm() {
     setIsSaving(true);
     let idToken: string | null = null; 
     try {
-      // Force refresh the token to ensure it's not stale
       idToken = await auth.currentUser.getIdToken(true); 
 
       if (!idToken || typeof idToken !== 'string' || idToken.trim() === '') {
@@ -144,28 +165,44 @@ export function ExpenseForm() {
         setIsSaving(false);
         return;
       }
-      // console.log("onSubmit: Obtained idToken (first 20 chars):", idToken.substring(0, 20));
+      
+      // Ensure companyId and status are correctly set based on user context if not already by form state
+      const finalData: ExpenseFormData = {
+          ...data,
+          companyId: user.companyId || null,
+          status: user.companyId ? (data.status || 'pending') : 'approved',
+      };
 
 
-      const result = await saveExpense(idToken, data); 
+      const result = await saveExpense(idToken, finalData); 
 
       if (result.success) {
         toast({ title: 'Expense Saved', description: `Your expense (ID: ${result.docId}) has been successfully saved.` });
-        form.reset({
-          company: '',
-          items: [{ name: '', quantity: 1, netPrice: 0 }],
-          category: 'other',
-          expenseDate: new Date(),
-          paymentMethod: 'card',
-        });
-        setImageFile(null);
-        setImagePreviewUrl(null);
-        if (fileInputRef.current) {
-          fileInputRef.current.value = '';
-        }
+        setIsLogged(true); 
+        setTimeout(() => {
+          form.reset({
+            company: user.companyId ? 'My Company' : '', // Reset company name based on context
+            companyId: user.companyId || null,
+            items: [{ name: '', quantity: 1, netPrice: 0 }],
+            category: 'other',
+            expenseDate: new Date(),
+            paymentMethod: 'card',
+            status: user.companyId ? 'pending' : 'approved',
+          });
+          setImageFile(null);
+          setImagePreviewUrl(null);
+          if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+          }
+          setIsLogged(false); 
+        }, 800); 
+
       } else {
+        const adminDetails = getAdminProjectDetails();
+        const clientProjectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'MISSING_CLIENT_ENV_VAR';
+        const errorPrefix = `AdminP: ${adminDetails.projectId}, ClientP: ${clientProjectId}. Hint: ${adminDetails.errorHint}. `;
         console.error("onSubmit: saveExpense returned error:", result.error, "Token used (first 20 chars):", idToken ? idToken.substring(0, 20) : "null/empty");
-        toast({ title: 'Save Failed', description: result.error, variant: 'destructive' });
+        toast({ title: 'Save Failed', description: `${errorPrefix}${result.error}`, variant: 'destructive' });
       }
     } catch (error: any) {
       console.error("onSubmit: Error during token retrieval or saveExpense call:", error, "Token value if obtained (first 20 chars):", idToken ? idToken.substring(0,20) : "not obtained or null/empty");
@@ -185,7 +222,7 @@ export function ExpenseForm() {
 
 
   return (
-    <Card className="w-full max-w-3xl mx-auto shadow-xl">
+    <Card className={cn("w-full max-w-3xl mx-auto receipt-card", isLogged && "logging-animation")}> 
       <CardHeader>
         <CardTitle className="text-2xl font-semibold text-center">Add New Expense</CardTitle>
       </CardHeader>
@@ -226,7 +263,7 @@ export function ExpenseForm() {
                 name="company"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-base">Company</FormLabel>
+                    <FormLabel className="text-base">Company / Vendor</FormLabel>
                     <FormControl>
                       <Input placeholder="e.g., Starbucks" {...field} className="text-base" />
                     </FormControl>
@@ -396,9 +433,9 @@ export function ExpenseForm() {
             </div>
 
             <CardFooter className="p-0 pt-6">
-              <Button type="submit" disabled={isSaving || isExtracting || !user} className="w-full text-lg py-3">
+              <Button type="submit" disabled={isSaving || isExtracting || !user || isLogged} className="w-full text-lg py-3">
                 {isSaving ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : null}
-                Save Expense
+                {isLogged ? 'Logging...' : 'Save Expense'}
               </Button>
             </CardFooter>
           </form>
@@ -407,5 +444,3 @@ export function ExpenseForm() {
     </Card>
   );
 }
-
-    

@@ -8,16 +8,17 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useRouter } from 'next/navigation';
 import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore'; // Import serverTimestamp
 import { auth, db } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, UserPlus } from 'lucide-react';
+import type { UserProfile } from '@/types/user';
 
 const registerFormSchema = z.object({
-  displayName: z.string().min(2, 'Display name must be at least 2 characters').optional(),
+  displayName: z.string().min(2, 'Display name must be at least 2 characters').max(50, 'Display name too long').optional(),
   email: z.string().email('Invalid email address'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
   confirmPassword: z.string(),
@@ -48,18 +49,20 @@ export function RegisterForm() {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password);
       const user = userCredential.user;
+      const finalDisplayName = data.displayName || user.email?.split('@')[0] || 'User';
 
-      if (data.displayName) {
-        await updateProfile(user, { displayName: data.displayName });
-      }
+
+      await updateProfile(user, { displayName: finalDisplayName });
       
       // Create user profile in Firestore
-      await setDoc(doc(db, "users", user.uid), {
+      const userProfile: Omit<UserProfile, 'companyId' | 'role'> = { // Explicitly type for clarity
         uid: user.uid,
         email: user.email,
-        displayName: data.displayName || user.email, // Default to email if no display name
-        createdAt: new Date(),
-      });
+        displayName: finalDisplayName,
+        createdAt: serverTimestamp(), // Use serverTimestamp for consistency
+      };
+      await setDoc(doc(db, "users", user.uid), userProfile);
+
 
       toast({ title: 'Registration Successful', description: 'Welcome to ReceiptSnap!' });
       router.push('/'); // Redirect to dashboard or home page
@@ -70,6 +73,8 @@ export function RegisterForm() {
         errorMessage = 'This email is already registered.';
       } else if (error.code === 'auth/weak-password') {
         errorMessage = 'Password is too weak. Please choose a stronger password.';
+      } else if (error.code === 'auth/operation-not-allowed') {
+        errorMessage = 'Email/password accounts are not enabled. Please contact support.';
       }
       toast({
         title: 'Registration Failed',

@@ -4,7 +4,7 @@
 
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { ScanBarcode, LogOut, UserCircle, UserPlus } from 'lucide-react';
+import { ScanBarcode, LogOut, UserCircle, UserPlus, Briefcase, Building } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/use-auth';
 import { auth } from '@/lib/firebase';
@@ -39,7 +39,6 @@ export function AppLayout({ children }: AppLayoutProps) {
     }
   };
   
-  // Don't render full layout on login/register pages for a cleaner UI
   if (pathname === '/login' || pathname === '/register') {
     return (
       <div className="min-h-screen flex flex-col bg-secondary">
@@ -65,13 +64,24 @@ export function AppLayout({ children }: AppLayoutProps) {
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="flex items-center gap-2 text-primary-foreground hover:bg-primary/80 hover:text-primary-foreground">
                     <UserCircle size={20} />
-                    <span>{user.email}</span>
+                    <span>{user.displayName || user.email}</span>
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
                   <DropdownMenuLabel>My Account</DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  {/* Add more items here like 'Profile', 'Settings' if needed */}
+                  {user.companyId ? (
+                    <DropdownMenuItem onClick={() => router.push('/company')} className="cursor-pointer">
+                      <Briefcase className="mr-2 h-4 w-4" />
+                      <span>Manage Business</span>
+                    </DropdownMenuItem>
+                  ) : (
+                    <DropdownMenuItem onClick={() => router.push('/company/create')} className="cursor-pointer">
+                      <Building className="mr-2 h-4 w-4" />
+                      <span>Try Business Mode</span>
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleLogout} className="cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10">
                     <LogOut className="mr-2 h-4 w-4" />
                     <span>Log out</span>
