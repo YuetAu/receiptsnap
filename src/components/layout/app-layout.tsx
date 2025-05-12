@@ -4,7 +4,7 @@
 
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { ScanBarcode, LogOut, UserCircle, UserPlus, Briefcase, Building } from 'lucide-react';
+import { ScanBarcode, LogOut, UserCircle, UserPlus, Briefcase, Building, UserCog } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/use-auth';
 import { auth } from '@/lib/firebase';
@@ -70,6 +70,10 @@ export function AppLayout({ children }: AppLayoutProps) {
                 <DropdownMenuContent align="end" className="w-56">
                   <DropdownMenuLabel>My Account</DropdownMenuLabel>
                   <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => router.push('/profile')} className="cursor-pointer">
+                    <UserCog className="mr-2 h-4 w-4" />
+                    <span>Account Profile</span>
+                  </DropdownMenuItem>
                   {user.companyId ? (
                     <DropdownMenuItem onClick={() => router.push('/company')} className="cursor-pointer">
                       <Briefcase className="mr-2 h-4 w-4" />
@@ -111,3 +115,4 @@ export function AppLayout({ children }: AppLayoutProps) {
     </div>
   );
 }
+
