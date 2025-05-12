@@ -10,10 +10,20 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Users, Mail, PlusCircle, Trash2, Edit3, LogOutIcon } from 'lucide-react';
+import { Loader2, Users, Mail, PlusCircle, Trash2, Edit3, LogOutIcon, Building, Briefcase } from 'lucide-react'; // Added Building, Briefcase
 import { getCompaniesForUser, sendInvitation, acceptInvitation, getInvitationsForUser, removeUserFromCompany, updateUserRole, leaveCompany } from '@/actions/expense-actions';
-import type { Company, Invitation as InvitationType } from '@/types'; // Assuming a root types/index.ts or similar
+import type { Company, Invitation as InvitationType } from '@/types'; 
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { UserRole } from '@/types/user';
 import { auth } from '@/lib/firebase';
@@ -39,6 +49,10 @@ export default function CompanyPage() {
   const [editMemberRole, setEditMemberRole] = useState<UserRole>('user');
   const [isEditRoleDialogOpen, setIsEditRoleDialogOpen] = useState(false);
 
+  // State for expense association dialog on join
+  const [showExpenseAssociationDialogOnJoin, setShowExpenseAssociationDialogOnJoin] = useState(false);
+  const [joinedCompanyName, setJoinedCompanyName] = useState('');
+
 
   useEffect(() => {
     if (authLoading) return;
@@ -47,25 +61,19 @@ export default function CompanyPage() {
       return;
     }
     if (!user.companyId) {
-       // If user has no company, check for invitations
        fetchUserInvitations();
-       // User might be on this page to accept an invitation or see they have no company
-       // No redirect here, allow component to render based on invitations or lack of company
        setIsLoading(false);
        return;
     }
     fetchCompanyDetails();
-    fetchUserInvitations(); // Also fetch invitations if user is in a company
+    fetchUserInvitations(); 
   }, [user, authLoading, router]);
 
   const fetchCompanyDetails = async () => {
     if (!user || !user.companyId || !auth.currentUser) return;
     setIsLoading(true);
     try {
-      // We need a way to get a single company's details.
-      // For now, getCompaniesForUser will return an array, we find the current one.
-      // Ideally, a getCompanyById action would be better.
-      const companies = await getCompaniesForUser(user.uid); // This is client-side, so it's okay.
+      const companies = await getCompaniesForUser(user.uid); 
       const currentCompany = companies.find(c => c.id === user.companyId);
       setCompany(currentCompany || null);
       if (!currentCompany) {
@@ -101,7 +109,6 @@ export default function CompanyPage() {
         setInviteEmail('');
         setInviteRole('user');
         setIsInviteDialogOpen(false);
-        // Potentially refresh member list or add pending invitation to UI
       } else {
         toast({ title: 'Failed to Send Invitation', description: result.error, variant: 'destructive' });
       }
@@ -113,17 +120,17 @@ export default function CompanyPage() {
     }
   };
 
-  const handleAcceptInvitation = async (invitationId: string) => {
+  const handleAcceptInvitation = async (invitationId: string, companyNameToJoin: string) => {
     if (!user || !auth.currentUser) return;
     setIsSubmitting(true);
     try {
       const idToken = await auth.currentUser.getIdToken(true);
       const result = await acceptInvitation(idToken, invitationId);
       if (result.success) {
-        toast({ title: 'Invitation Accepted', description: 'You have joined the company.' });
-        await refreshUserProfile(); // Refresh user profile to get new companyId and role
-        setInvitations(prev => prev.filter(inv => inv.id !== invitationId)); // Remove from local state
-         // No explicit router.push needed, useEffect will refetch company details once user.companyId is updated.
+        toast({ title: 'Invitation Accepted', description: `You have joined ${companyNameToJoin}.` });
+        setJoinedCompanyName(companyNameToJoin);
+        setShowExpenseAssociationDialogOnJoin(true);
+        // Further actions (refreshUserProfile, update local state) moved to handleExpenseAssociationDialogOnJoinClose
       } else {
         toast({ title: 'Failed to Accept Invitation', description: result.error, variant: 'destructive' });
       }
@@ -135,20 +142,32 @@ export default function CompanyPage() {
     }
   };
 
+  const handleExpenseAssociationDialogOnJoinClose = async (associate: boolean) => {
+    setShowExpenseAssociationDialogOnJoin(false);
+    if (associate) {
+      // For now, just a toast. Actual DB operation is not implemented.
+      toast({ title: "Expense Association", description: "Existing personal expenses will be reviewed for association (simulated)." });
+    } else {
+      toast({ title: "Expense Association", description: "Existing personal expenses will remain personal." });
+    }
+    await refreshUserProfile(); // Refresh user profile to get new companyId and role
+    setInvitations(prev => prev.filter(inv => inv.companyName !== joinedCompanyName)); // Remove accepted invitation by company name (or use ID if available from context)
+    // This will trigger useEffect to fetch company details if companyId is now set
+  };
+
   const handleRemoveMember = async (memberIdToRemove: string) => {
-    if (!user || !company || !auth.currentUser || user.uid === memberIdToRemove) return; // Can't remove self this way
+    if (!user || !company || !auth.currentUser || user.uid === memberIdToRemove) return; 
     if (user.role !== 'owner' && user.role !== 'admin') {
         toast({title: "Permission Denied", description: "You cannot remove members.", variant: "destructive"});
         return;
     }
-    // Add more specific role checks if admin cannot remove other admins etc.
      setIsSubmitting(true);
     try {
         const idToken = await auth.currentUser.getIdToken(true);
         const result = await removeUserFromCompany(idToken, memberIdToRemove, company.id);
         if(result.success){
             toast({title: "Member Removed", description: "The member has been removed from the company."});
-            fetchCompanyDetails(); // Refresh company details
+            fetchCompanyDetails(); 
         } else {
             toast({title: "Removal Failed", description: result.error, variant: "destructive"});
         }
@@ -172,16 +191,13 @@ export default function CompanyPage() {
          toast({title: "Permission Denied", description: "You cannot update roles.", variant: "destructive"});
         return;
     }
-     // Add more specific logic: e.g., admin cannot change owner's role or other admin's role.
-     // Owner can change any role.
-
     setIsSubmitting(true);
     try {
         const idToken = await auth.currentUser.getIdToken(true);
         const result = await updateUserRole(idToken, editMemberId, company.id, editMemberRole);
         if(result.success){
             toast({title: "Role Updated", description: "Member's role has been updated."});
-            fetchCompanyDetails(); // Refresh company details
+            fetchCompanyDetails(); 
             setIsEditRoleDialogOpen(false);
         } else {
             toast({title: "Update Failed", description: result.error, variant: "destructive"});
@@ -206,7 +222,7 @@ export default function CompanyPage() {
         if(result.success){
             toast({title: "Left Company", description: "You have successfully left the company."});
             await refreshUserProfile();
-            router.push('/'); // Redirect to home or another appropriate page
+            router.push('/'); 
         } else {
             toast({title: "Failed to Leave", description: result.error, variant: "destructive"});
         }
@@ -227,7 +243,6 @@ export default function CompanyPage() {
     );
   }
   
-  // If user has no companyId and no pending invitations
   if (!user.companyId && invitations.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center text-center py-10">
@@ -243,7 +258,6 @@ export default function CompanyPage() {
     );
   }
 
-  // If user has no companyId BUT has pending invitations
   if (!user.companyId && invitations.length > 0) {
      return (
       <div className="container mx-auto py-8">
@@ -256,7 +270,7 @@ export default function CompanyPage() {
                 <CardDescription>Invited by user with ID: {invite.inviterId}. Role: {invite.role}</CardDescription>
               </CardHeader>
               <CardFooter>
-                <Button onClick={() => handleAcceptInvitation(invite.id)} disabled={isSubmitting} className="w-full">
+                <Button onClick={() => handleAcceptInvitation(invite.id, invite.companyName)} disabled={isSubmitting} className="w-full">
                   {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Accept Invitation'}
                 </Button>
               </CardFooter>
@@ -268,8 +282,8 @@ export default function CompanyPage() {
   }
 
 
-  // If user is part of a company (company object should be loaded)
   return (
+    <>
     <div className="container mx-auto py-8">
       {company ? (
         <Card className="w-full max-w-4xl mx-auto shadow-xl">
@@ -286,14 +300,13 @@ export default function CompanyPage() {
                 <Users className="mr-2 h-5 w-5 text-primary" /> Members
               </h3>
               <ul className="space-y-2">
-                {company.members.map(memberId => ( // This should ideally be a list of member objects with name/email
+                {company.members.map(memberId => ( 
                   <li key={memberId} className="flex justify-between items-center p-3 bg-secondary rounded-md">
-                    {/* TODO: Fetch member details (displayName/email) for better display */}
                     <span className="text-sm">{memberId === user?.uid ? `${memberId} (You)` : memberId} - Role: {memberId === company.ownerId ? 'Owner' : 'Member/Admin/Auditor'}</span>
                      <div>
                        { (user?.role === 'owner' || user?.role === 'admin') && memberId !== user.uid && (
                            <>
-                            <Button variant="ghost" size="sm" onClick={() => handleOpenEditRoleDialog(memberId, 'user' /* TODO: Get actual current role */)} className="mr-2">
+                            <Button variant="ghost" size="sm" onClick={() => handleOpenEditRoleDialog(memberId, 'user' )} className="mr-2">
                                 <Edit3 size={16} />
                             </Button>
                             <Button variant="destructive" size="sm" onClick={() => handleRemoveMember(memberId)} disabled={isSubmitting || memberId === company.ownerId}>
@@ -351,7 +364,6 @@ export default function CompanyPage() {
               </div>
             )}
 
-             {/* Edit Role Dialog */}
              <Dialog open={isEditRoleDialogOpen} onOpenChange={setIsEditRoleDialogOpen}>
                 <DialogContent>
                     <DialogHeader>
@@ -390,15 +402,12 @@ export default function CompanyPage() {
                     </Button>
                  </div>
             )}
-
-
           </CardContent>
         </Card>
       ) : (
          !isLoading && <p className="text-center text-muted-foreground">Company data not found or you are not part of a company.</p>
       )}
       
-      {/* Display pending invitations if user is already in a company but has other invites */}
       {user.companyId && invitations.length > 0 && (
          <div className="mt-10">
             <h2 className="text-2xl font-semibold mb-4 text-center">Other Pending Invitations</h2>
@@ -411,7 +420,7 @@ export default function CompanyPage() {
                     </CardHeader>
                     <CardFooter>
                         <Button 
-                            onClick={() => handleAcceptInvitation(invite.id)} 
+                            onClick={() => handleAcceptInvitation(invite.id, invite.companyName)} 
                             disabled={isSubmitting} 
                             className="w-full"
                             variant="outline"
@@ -425,5 +434,24 @@ export default function CompanyPage() {
          </div>
       )}
     </div>
+
+    <AlertDialog open={showExpenseAssociationDialogOnJoin} onOpenChange={setShowExpenseAssociationDialogOnJoin}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Associate Existing Expenses?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You&apos;ve joined the company &quot;{joinedCompanyName}&quot;. 
+              Do you want to associate your existing personal expenses with this company?
+              This would make them visible to company members according to their roles.
+              Currently, this action is for confirmation only and will not modify existing expense data.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => handleExpenseAssociationDialogOnJoinClose(false)}>No, Keep Personal</AlertDialogCancel>
+            <AlertDialogAction onClick={() => handleExpenseAssociationDialogOnJoinClose(true)}>Yes, Associate (Simulated)</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
