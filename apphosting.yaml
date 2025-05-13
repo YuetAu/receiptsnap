@@ -1,0 +1,32 @@
+# Settings for Cloud Run
+runConfig:
+  minInstances: 1
+  maxInstances: 5
+  concurrency: 100
+  cpu: 1
+  memoryMiB: 1024
+
+# Environment variables and secrets
+env:
+  - variable: GEMINI_API_KEY
+    value: "AIzaSyDBmmR_eHxtB42Bvo7E4Z9HwdLGLgr0138"
+  - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+    value: "AIzaSyDeALnb7WxGxerPnJjj4gs9J8T42EmqB6s"
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: "receiptsnap-4fnau.firebaseapp.com"
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: "receiptsnap-4fnau"
+  - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+    value: "receiptsnap-4fnau.firebasestorage.app"
+  - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+    value: "252570960316"
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    value: "1:252570960316:web:b3e84b5250fdf8e9322bb9"
+  - variable: GOOGLE_APPLICATION_CREDENTIALS
+    value: "service-account.json"
+  - variable: FIREBASE_ADMIN_PROJECT_ID
+    value: "receiptsnap-4fnau"
+  - variable: FIREBASE_ADMIN_PRIVATE_KEY
+    value: "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC/h/mZtnAg3RX1\nWEyajaxVEFsRHQzvYijbQQ6UJl4X4ufAz7c0Lmwf/pLXIx3YVfbx/XBdQIyR6cUM\ncXkHhYoNDxfNs5Jl+W3Jz8jqabFLPF6PBitezATSutOZ/f8dpiZTtyjMOYjsh9Tt\nHmslkic3p+367x0BASg6XOtBvECxNkdMdeDAjnbqPKC5DJgB4nVm6lUIMej20HCL\n1npXLVZm3dpt3kQKa+hDHD93KSUzWUlV2st7/WHGgs3kXBZ432elPda4XsSUUz82\nIJ/mbY7rEkve33EIIc3AIwASD5Emhrhp+rtwQqbzxyBrgO729KvHVey3hgtkNcZY\nLtqn3XGLAgMBAAECggEAI3SkfBQNxcennPdvltzLHiQc95oNHvNo5M2ySTKhEILs\nrADHxV0invmdbT4O9FFVmY51Eo40d35y/86xvPa3i5tTqLypST9XV5ijdOGD9I2E\nY62csbvK2MfFDCi85VwwlCa/4q5z7nVmsU6EPzxDDkaEA4PoNptkOwmgc1bKEwPL\nS4YvBD+dYFxgoFMmEnLQ8ezkE2TiJDaShqPqYPm4IwYGX+GERAwiYO66CSiaimCZ\n7exacI1ZxSi7RyPL7nzlFRdBVCJgEcGheeRek1yvSyAo0Ca5ZOeFAgmd6hI8Pml1\n9nsxuXr3Jluu/CfeuZZqrZJi6NrouTzQHZIZkkjLIQKBgQDdhyzbw2jqhjNRrNhJ\nZBBwI+STzt8enL4969h/MRBxhJJM1VIT+QJX+ZlGSMvEzB6gGk6f1YikStqVIKeZ\n5G43KOn82p4x5OCcrWJ8L0rcaY+J3MqzXsLWInKlOEr86qQkxRyXCELf1VjdH3Ms\nzEN48Mfn8Cd+5Ih2HEwXzq10TQKBgQDdVdbvVHNAQhGPQ9T2ogWaz8VlYqlbgU3m\nC02430uL59H7B1+eb8TBDPhRYvpKpfXHu+ES/CGjAufE9rSBmI9/9AGsjb4e9qZO\nj7Wa0PqiIqa3Mp+jgQGTOchTrs16I5/5Ly7UNRajYz7MivWkbO0JOguv98eD4ueb\nz3aSee3JNwKBgQDB0FRE6ZBPL56SpMCOZUekdSK01teKtuQS1NcTYN/cEXrWUgR/\niOquAahCP8pXoaZhuOJ1IKNt6jeXJXy9PYfYJqmhGbwyNub07RUvRUkf0hNNMKj/\niba5FmZrevbQlJGLwhCjawznPIeE3tErroKRu0eK+yfy8wsZGuTQJ3jGOQKBgQDD\nGcx5cL6a0OI7n/ZUZON94FHHGd3hXCx3cFVVdfdY3sK4fXpq5WjRJwaobw/jx0DM\njC9NFdTspT353+GjLwCnMEZdfSAumQply8WwLzAOxW6ho80WSjxCM7gDE93qIQb9\nlvq3cgh/g5cyo/b9tkqHTJRKy6Yh+lxgetKxMStKpwKBgAcW/dsq8kRSjLis0nh4\nty7b+0qEjwWbVin9xDk0UELc6HqbAY9ahjzeU6TRlmBd0mBbIGftVdbFK6RWWKx1\nCQdcKDw6B8OMSUPIWvX5RHmC0kjFzB4UpHlymEtROCQTNE3WELi73vqwxALvOa1E\nbxKFdKeTKaEdbOqqh54Jqopu\n-----END PRIVATE KEY-----\n"
+  - variable: FIREBASE_ADMIN_CLIENT_EMAIL
+    value: "firebase-adminsdk-fbsvc@receiptsnap-4fnau.iam.gserviceaccount.com"
