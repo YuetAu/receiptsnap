@@ -11,8 +11,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Users, Mail, PlusCircle, Trash2, Edit3, LogOutIcon, Building, Briefcase } from 'lucide-react'; // Added Building, Briefcase
-import { getCompaniesForUser, sendInvitation, acceptInvitation, getInvitationsForUser, removeUserFromCompany, updateUserRole, leaveCompany } from '@/actions/expense-actions';
-import type { Company, Invitation as InvitationType } from '@/types'; 
+import { getCompaniesForUser, sendInvitation, acceptInvitation, getInvitationsForUser, removeUserFromCompany, updateUserRole, leaveCompany, fetchMemberDisplayNames } from '@/actions/expense-actions';
+import type { Company, Invitation as InvitationType } from '@/types';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import {
   AlertDialog,
@@ -43,7 +43,7 @@ export default function CompanyPage() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<UserRole>('user');
   const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false);
-  
+
   // State for edit role dialog
   const [editMemberId, setEditMemberId] = useState<string | null>(null);
   const [editMemberRole, setEditMemberRole] = useState<UserRole>('user');
@@ -61,23 +61,35 @@ export default function CompanyPage() {
       return;
     }
     if (!user.companyId) {
-       fetchUserInvitations();
-       setIsLoading(false);
-       return;
+      fetchUserInvitations();
+      setIsLoading(false);
+      return;
     }
     fetchCompanyDetails();
-    fetchUserInvitations(); 
+    fetchUserInvitations();
   }, [user, authLoading, router]);
 
   const fetchCompanyDetails = async () => {
-    if (!user || !user.companyId || !auth.currentUser) return;
+    if (!auth || !auth.currentUser || !user || !user.companyId) {
+      console.log("User or companyId is missing:", user);
+      return;
+    }
     setIsLoading(true);
     try {
-      const companies = await getCompaniesForUser(user.uid); 
+      console.log("Fetching companies for user:", user.uid);
+      const idToken = await auth.currentUser.getIdToken(true);
+      const companies = await getCompaniesForUser(idToken);
+      console.log("Fetched companies:", companies);
       const currentCompany = companies.find(c => c.id === user.companyId);
-      setCompany(currentCompany || null);
-      if (!currentCompany) {
+
+      if (currentCompany) {
+        // Fetch display names for members
+        const memberDisplayNames = await fetchMemberDisplayNames(currentCompany.members);
+        setCompany({ ...currentCompany, memberDisplayNames });
+      } else {
+        console.error("Company not found for companyId:", user.companyId);
         toast({ title: 'Error', description: 'Could not load your company details.', variant: 'destructive' });
+        setCompany(null);
       }
     } catch (error) {
       console.error('Error fetching company details:', error);
@@ -88,16 +100,18 @@ export default function CompanyPage() {
   };
 
   const fetchUserInvitations = async () => {
-    if (!user || !user.email) return;
+    if (!auth || !auth.currentUser) return;
     try {
-      const userInvites = await getInvitationsForUser(user.email);
+      console.log("Fetching invitations for user:", auth.currentUser.uid);
+      const idToken = await auth.currentUser.getIdToken(true);
+      const userInvites = await getInvitationsForUser(idToken);
       setInvitations(userInvites.filter(inv => inv.status === 'pending'));
     } catch (error) {
       console.error('Error fetching invitations:', error);
       toast({ title: 'Error', description: 'Failed to fetch invitations.', variant: 'destructive' });
     }
   };
-  
+
   const handleSendInvitation = async () => {
     if (!user || !company || !auth.currentUser) return;
     setIsSubmitting(true);
@@ -156,26 +170,26 @@ export default function CompanyPage() {
   };
 
   const handleRemoveMember = async (memberIdToRemove: string) => {
-    if (!user || !company || !auth.currentUser || user.uid === memberIdToRemove) return; 
+    if (!user || !company || !auth.currentUser || user.uid === memberIdToRemove) return;
     if (user.role !== 'owner' && user.role !== 'admin') {
-        toast({title: "Permission Denied", description: "You cannot remove members.", variant: "destructive"});
-        return;
+      toast({ title: "Permission Denied", description: "You cannot remove members.", variant: "destructive" });
+      return;
     }
-     setIsSubmitting(true);
+    setIsSubmitting(true);
     try {
-        const idToken = await auth.currentUser.getIdToken(true);
-        const result = await removeUserFromCompany(idToken, memberIdToRemove, company.id);
-        if(result.success){
-            toast({title: "Member Removed", description: "The member has been removed from the company."});
-            fetchCompanyDetails(); 
-        } else {
-            toast({title: "Removal Failed", description: result.error, variant: "destructive"});
-        }
+      const idToken = await auth.currentUser.getIdToken(true);
+      const result = await removeUserFromCompany(idToken, memberIdToRemove, company.id);
+      if (result.success) {
+        toast({ title: "Member Removed", description: "The member has been removed from the company." });
+        fetchCompanyDetails();
+      } else {
+        toast({ title: "Removal Failed", description: result.error, variant: "destructive" });
+      }
     } catch (error) {
-        console.error("Error removing member:", error);
-        toast({title: "Error", description: "Failed to remove member.", variant: "destructive"});
+      console.error("Error removing member:", error);
+      toast({ title: "Error", description: "Failed to remove member.", variant: "destructive" });
     } finally {
-        setIsSubmitting(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -188,49 +202,49 @@ export default function CompanyPage() {
   const handleUpdateRole = async () => {
     if (!user || !company || !editMemberId || !auth.currentUser) return;
     if (user.role !== 'owner' && user.role !== 'admin') {
-         toast({title: "Permission Denied", description: "You cannot update roles.", variant: "destructive"});
-        return;
+      toast({ title: "Permission Denied", description: "You cannot update roles.", variant: "destructive" });
+      return;
     }
     setIsSubmitting(true);
     try {
-        const idToken = await auth.currentUser.getIdToken(true);
-        const result = await updateUserRole(idToken, editMemberId, company.id, editMemberRole);
-        if(result.success){
-            toast({title: "Role Updated", description: "Member's role has been updated."});
-            fetchCompanyDetails(); 
-            setIsEditRoleDialogOpen(false);
-        } else {
-            toast({title: "Update Failed", description: result.error, variant: "destructive"});
-        }
+      const idToken = await auth.currentUser.getIdToken(true);
+      const result = await updateUserRole(idToken, editMemberId, company.id, editMemberRole);
+      if (result.success) {
+        toast({ title: "Role Updated", description: "Member's role has been updated." });
+        fetchCompanyDetails();
+        setIsEditRoleDialogOpen(false);
+      } else {
+        toast({ title: "Update Failed", description: result.error, variant: "destructive" });
+      }
     } catch (error) {
-        console.error("Error updating role:", error);
-        toast({title: "Error", description: "Failed to update role.", variant: "destructive"});
+      console.error("Error updating role:", error);
+      toast({ title: "Error", description: "Failed to update role.", variant: "destructive" });
     } finally {
-        setIsSubmitting(false);
+      setIsSubmitting(false);
     }
   };
-  
+
   const handleLeaveCompany = async () => {
     if (!user || !user.companyId || !auth.currentUser || user.role === 'owner') {
-        toast({title: "Action Not Allowed", description: "Owners must transfer ownership or delete the company to leave.", variant: "destructive"});
-        return;
+      toast({ title: "Action Not Allowed", description: "Owners must transfer ownership or delete the company to leave.", variant: "destructive" });
+      return;
     }
     setIsSubmitting(true);
     try {
-        const idToken = await auth.currentUser.getIdToken(true);
-        const result = await leaveCompany(idToken, user.companyId);
-        if(result.success){
-            toast({title: "Left Company", description: "You have successfully left the company."});
-            await refreshUserProfile();
-            router.push('/'); 
-        } else {
-            toast({title: "Failed to Leave", description: result.error, variant: "destructive"});
-        }
+      const idToken = await auth.currentUser.getIdToken(true);
+      const result = await leaveCompany(idToken, user.companyId);
+      if (result.success) {
+        toast({ title: "Left Company", description: "You have successfully left the company." });
+        await refreshUserProfile();
+        router.push('/');
+      } else {
+        toast({ title: "Failed to Leave", description: result.error, variant: "destructive" });
+      }
     } catch (error) {
-        console.error("Error leaving company:", error);
-        toast({title: "Error", description: "Failed to leave company.", variant: "destructive"});
+      console.error("Error leaving company:", error);
+      toast({ title: "Error", description: "Failed to leave company.", variant: "destructive" });
     } finally {
-        setIsSubmitting(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -242,7 +256,7 @@ export default function CompanyPage() {
       </div>
     );
   }
-  
+
   if (!user.companyId && invitations.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center text-center py-10">
@@ -259,7 +273,7 @@ export default function CompanyPage() {
   }
 
   if (!user.companyId && invitations.length > 0) {
-     return (
+    return (
       <div className="container mx-auto py-8">
         <h1 className="text-3xl font-bold mb-6 text-center">Your Invitations</h1>
         <div className="max-w-md mx-auto space-y-4">
@@ -284,163 +298,166 @@ export default function CompanyPage() {
 
   return (
     <>
-    <div className="container mx-auto py-8">
-      {company ? (
-        <Card className="w-full max-w-4xl mx-auto shadow-xl">
-          <CardHeader>
-            <CardTitle className="text-3xl flex items-center">
-              <Briefcase className="mr-3 h-8 w-8 text-primary" />
-              {company.name}
-            </CardTitle>
-            <CardDescription>Manage your company members, roles, and settings.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div>
-              <h3 className="text-xl font-semibold mb-3 flex items-center">
-                <Users className="mr-2 h-5 w-5 text-primary" /> Members
-              </h3>
-              <ul className="space-y-2">
-                {company.members.map(memberId => ( 
-                  <li key={memberId} className="flex justify-between items-center p-3 bg-secondary rounded-md">
-                    <span className="text-sm">{memberId === user?.uid ? `${memberId} (You)` : memberId} - Role: {memberId === company.ownerId ? 'Owner' : 'Member/Admin/Auditor'}</span>
-                     <div>
-                       { (user?.role === 'owner' || user?.role === 'admin') && memberId !== user.uid && (
-                           <>
-                            <Button variant="ghost" size="sm" onClick={() => handleOpenEditRoleDialog(memberId, 'user' )} className="mr-2">
-                                <Edit3 size={16} />
+      <div className="container mx-auto py-8">
+        {company ? (
+          <Card className="w-full max-w-4xl mx-auto shadow-xl">
+            <CardHeader>
+              <CardTitle className="text-3xl flex items-center">
+                <Briefcase className="mr-3 h-8 w-8 text-primary" />
+                {company.name}
+              </CardTitle>
+              <CardDescription>Manage your company members, roles, and settings.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div>
+                <h3 className="text-xl font-semibold mb-3 flex items-center">
+                  <Users className="mr-2 h-5 w-5 text-primary" /> Members
+                </h3>
+                <ul className="space-y-2">
+                  {company.members.map(memberId => (
+                    <li key={memberId} className="flex justify-between items-center p-3 bg-secondary rounded-md">
+                      <span className="text-sm">
+                        {company.memberDisplayNames[memberId] || memberId}
+                        {memberId === user?.uid ? " (You)" : ""} - Role: {memberId === company.ownerId ? 'Owner' : 'Member/Admin/Auditor'}
+                      </span>
+                      <div>
+                        {(user?.role === 'owner' || user?.role === 'admin') && memberId !== user.uid && (
+                          <>
+                            <Button variant="ghost" size="sm" onClick={() => handleOpenEditRoleDialog(memberId, 'user')} className="mr-2">
+                              <Edit3 size={16} />
                             </Button>
                             <Button variant="destructive" size="sm" onClick={() => handleRemoveMember(memberId)} disabled={isSubmitting || memberId === company.ownerId}>
-                                <Trash2 size={16} />
+                              <Trash2 size={16} />
                             </Button>
-                           </>
-                       )}
-                     </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {(user?.role === 'owner' || user?.role === 'admin') && (
-              <div>
-                <Dialog open={isInviteDialogOpen} onOpenChange={setIsInviteDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button>
-                      <Mail className="mr-2 h-4 w-4" /> Invite New Member
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Invite New Member</DialogTitle>
-                      <DialogDescription>Enter the email address and assign a role for the new member.</DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
-                      <div>
-                        <Label htmlFor="invite-email">Email Address</Label>
-                        <Input id="invite-email" type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="member@example.com" />
+                          </>
+                        )}
                       </div>
-                      <div>
-                        <Label htmlFor="invite-role">Role</Label>
-                        <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as UserRole)}>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {(user?.role === 'owner' || user?.role === 'admin') && (
+                <div>
+                  <Dialog open={isInviteDialogOpen} onOpenChange={setIsInviteDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button>
+                        <Mail className="mr-2 h-4 w-4" /> Invite New Member
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Invite New Member</DialogTitle>
+                        <DialogDescription>Enter the email address and assign a role for the new member.</DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4 py-4">
+                        <div>
+                          <Label htmlFor="invite-email">Email Address</Label>
+                          <Input id="invite-email" type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="member@example.com" />
+                        </div>
+                        <div>
+                          <Label htmlFor="invite-role">Role</Label>
+                          <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as UserRole)}>
                             <SelectTrigger id="invite-role">
-                                <SelectValue placeholder="Select a role" />
+                              <SelectValue placeholder="Select a role" />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="user">User</SelectItem>
-                                <SelectItem value="admin">Admin</SelectItem>
-                                <SelectItem value="auditor">Auditor</SelectItem>
-                                {user.role === 'owner' && <SelectItem value="owner">Owner</SelectItem>}
+                              <SelectItem value="user">User</SelectItem>
+                              <SelectItem value="admin">Admin</SelectItem>
+                              <SelectItem value="auditor">Auditor</SelectItem>
+                              {user.role === 'owner' && <SelectItem value="owner">Owner</SelectItem>}
                             </SelectContent>
-                        </Select>
+                          </Select>
+                        </div>
                       </div>
-                    </div>
-                    <DialogFooter>
-                      <Button variant="outline" onClick={() => setIsInviteDialogOpen(false)}>Cancel</Button>
-                      <Button onClick={handleSendInvitation} disabled={isSubmitting || !inviteEmail}>
-                        {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Send Invitation'}
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              </div>
-            )}
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsInviteDialogOpen(false)}>Cancel</Button>
+                        <Button onClick={handleSendInvitation} disabled={isSubmitting || !inviteEmail}>
+                          {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Send Invitation'}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+              )}
 
-             <Dialog open={isEditRoleDialogOpen} onOpenChange={setIsEditRoleDialogOpen}>
+              <Dialog open={isEditRoleDialogOpen} onOpenChange={setIsEditRoleDialogOpen}>
                 <DialogContent>
-                    <DialogHeader>
+                  <DialogHeader>
                     <DialogTitle>Edit Member Role</DialogTitle>
                     <DialogDescription>Change the role for member ID: {editMemberId}</DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
+                  </DialogHeader>
+                  <div className="space-y-4 py-4">
                     <div>
-                        <Label htmlFor="edit-role">New Role</Label>
-                        <Select value={editMemberRole} onValueChange={(value) => setEditMemberRole(value as UserRole)}>
-                            <SelectTrigger id="edit-role">
-                                <SelectValue placeholder="Select a role" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="user">User</SelectItem>
-                                <SelectItem value="admin">Admin</SelectItem>
-                                <SelectItem value="auditor">Auditor</SelectItem>
-                                 {user?.role === 'owner' && <SelectItem value="owner">Owner</SelectItem>}
-                            </SelectContent>
-                        </Select>
+                      <Label htmlFor="edit-role">New Role</Label>
+                      <Select value={editMemberRole} onValueChange={(value) => setEditMemberRole(value as UserRole)}>
+                        <SelectTrigger id="edit-role">
+                          <SelectValue placeholder="Select a role" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="user">User</SelectItem>
+                          <SelectItem value="admin">Admin</SelectItem>
+                          <SelectItem value="auditor">Auditor</SelectItem>
+                          {user?.role === 'owner' && <SelectItem value="owner">Owner</SelectItem>}
+                        </SelectContent>
+                      </Select>
                     </div>
-                    </div>
-                    <DialogFooter>
+                  </div>
+                  <DialogFooter>
                     <Button variant="outline" onClick={() => setIsEditRoleDialogOpen(false)}>Cancel</Button>
                     <Button onClick={handleUpdateRole} disabled={isSubmitting}>
-                        {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Update Role'}
+                      {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Update Role'}
                     </Button>
-                    </DialogFooter>
+                  </DialogFooter>
                 </DialogContent>
-            </Dialog>
-            
-            {user?.role !== 'owner' && (
-                 <div className="mt-8 border-t pt-6">
-                    <Button variant="destructive" onClick={handleLeaveCompany} disabled={isSubmitting}>
-                        <LogOutIcon className="mr-2 h-4 w-4" /> Leave Company
-                    </Button>
-                 </div>
-            )}
-          </CardContent>
-        </Card>
-      ) : (
-         !isLoading && <p className="text-center text-muted-foreground">Company data not found or you are not part of a company.</p>
-      )}
-      
-      {user.companyId && invitations.length > 0 && (
-         <div className="mt-10">
-            <h2 className="text-2xl font-semibold mb-4 text-center">Other Pending Invitations</h2>
-             <div className="max-w-md mx-auto space-y-4">
-                {invitations.map(invite => (
-                    <Card key={invite.id} className="shadow-lg">
-                    <CardHeader>
-                        <CardTitle>Invitation to join {invite.companyName}</CardTitle>
-                        <CardDescription>Invited by: {invite.inviterId}. Role: {invite.role}</CardDescription>
-                    </CardHeader>
-                    <CardFooter>
-                        <Button 
-                            onClick={() => handleAcceptInvitation(invite.id, invite.companyName)} 
-                            disabled={isSubmitting} 
-                            className="w-full"
-                            variant="outline"
-                        >
-                        {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Accept (will leave current company)'}
-                        </Button>
-                    </CardFooter>
-                    </Card>
-                ))}
-            </div>
-         </div>
-      )}
-    </div>
+              </Dialog>
 
-    <AlertDialog open={showExpenseAssociationDialogOnJoin} onOpenChange={setShowExpenseAssociationDialogOnJoin}>
+              {user?.role !== 'owner' && (
+                <div className="mt-8 border-t pt-6">
+                  <Button variant="destructive" onClick={handleLeaveCompany} disabled={isSubmitting}>
+                    <LogOutIcon className="mr-2 h-4 w-4" /> Leave Company
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ) : (
+          !isLoading && <p className="text-center text-muted-foreground">Company data not found or you are not part of a company.</p>
+        )}
+
+        {user.companyId && invitations.length > 0 && (
+          <div className="mt-10">
+            <h2 className="text-2xl font-semibold mb-4 text-center">Other Pending Invitations</h2>
+            <div className="max-w-md mx-auto space-y-4">
+              {invitations.map(invite => (
+                <Card key={invite.id} className="shadow-lg">
+                  <CardHeader>
+                    <CardTitle>Invitation to join {invite.companyName}</CardTitle>
+                    <CardDescription>Invited by: {invite.inviterId}. Role: {invite.role}</CardDescription>
+                  </CardHeader>
+                  <CardFooter>
+                    <Button
+                      onClick={() => handleAcceptInvitation(invite.id, invite.companyName)}
+                      disabled={isSubmitting}
+                      className="w-full"
+                      variant="outline"
+                    >
+                      {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Accept (will leave current company)'}
+                    </Button>
+                  </CardFooter>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <AlertDialog open={showExpenseAssociationDialogOnJoin} onOpenChange={setShowExpenseAssociationDialogOnJoin}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Associate Existing Expenses?</AlertDialogTitle>
             <AlertDialogDescription>
-              You&apos;ve joined the company &quot;{joinedCompanyName}&quot;. 
+              You&apos;ve joined the company &quot;{joinedCompanyName}&quot;.
               Do you want to associate your existing personal expenses with this company?
               This would make them visible to company members according to their roles.
               Currently, this action is for confirmation only and will not modify existing expense data.

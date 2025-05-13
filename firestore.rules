@@ -11,8 +11,8 @@ service cloud.firestore {
       allow update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
     }
     match /companies/{companyId} {
-      // Allow read if authenticated
-      allow read: if request.auth != null;
+      // Allow read if authenticated and the user is a member of the company
+      allow read: if request.auth != null && (request.auth.uid == resource.data.ownerId || request.auth.uid in resource.data.members);
       // Allow create if authenticated
       allow create: if request.auth != null;
       // Allow update/delete only by the owner
@@ -23,7 +23,7 @@ service cloud.firestore {
       allow read: if request.auth != null && (resource.data.inviterId == request.auth.uid || resource.data.inviteeEmail == request.auth.token.email);
       // Allow create if authenticated and the inviter matches
       allow create: if request.auth != null && request.resource.data.inviterId == request.auth.uid;
-       // Allow update only to change status to 'accepted' by the invitee
+      // Allow update only to change status to 'accepted' by the invitee
       allow update: if request.auth != null && resource.data.inviteeEmail == request.auth.token.email && request.resource.data.status == 'accepted';
       // Allow delete only by the inviter
       allow delete: if request.auth != null && resource.data.inviterId == request.auth.uid;
